@@ -1,0 +1,124 @@
+name: update-config
+description: >
+  Configure the AI agent harness via settings.json. Automated behaviors
+  ("from now on when X", "each time X", "whenever X", "before/after X")
+  require hooks configured in settings.json. Also use for: permissions,
+  env vars, hook troubleshooting, or any changes to settings files.
+when_to_use: >
+  When the user wants to: configure hooks, add permissions ("allow X"),
+  set environment variables, modify settings.json or settings.local.json,
+  configure automated behaviors, or troubleshoot hooks.
+user_invocable: true
+allowed_tools:
+  - Read
+  - Edit
+  - Write
+  - Bash
+argument_hint: "[configuration change description]"
+
+template: |
+  # Update Config Skill
+
+  Configure the AI agent harness by editing settings files.
+
+  ## Settings File Locations
+
+  | File | Scope | Gitignored? |
+  |------|-------|-------------|
+  | `~/.claude/settings.json` | User (all projects) | N/A |
+  | `.claude/settings.json` | Project (shared) | No |
+  | `.claude/settings.local.json` | Project (personal) | Yes |
+
+  ## Decision Logic
+
+  - Simple model/theme changes → use `/model` or `/theme` commands directly
+  - Permissions → edit the appropriate settings file
+  - Hooks → edit settings.json
+  - Env vars → edit settings.json `env` section
+
+  ## Workflow
+
+  1. **Read** the target settings file first (it may not exist)
+  2. **Merge** changes — never replace the entire file
+  3. **Validate** JSON syntax after writing
+  4. **Verify** the change works (for hooks: test that the hook fires)
+
+  ## Settings Schema
+
+  ```json
+  {
+    "permissions": {
+      "allow": ["Bash(git:*)", "Read"],
+      "deny": ["Bash(rm -rf:*)"],
+      "defaultMode": "default"
+    },
+    "env": {
+      "DEBUG": "true",
+      "CUSTOM_VAR": "value"
+    },
+    "hooks": {
+      "PreToolUse": [
+        {
+          "matcher": "Bash",
+          "hooks": [
+            { "type": "command", "command": "echo 'About to run Bash'" }
+          ]
+        }
+      ],
+      "PostToolUse": [...],
+      "Stop": [...],
+      "SessionStart": [...]
+    },
+    "model": "claude-sonnet-4-6",
+    "theme": "dark"
+  }
+  ```
+
+  ## Hook Events
+
+  | Event | When | Use Case |
+  |-------|------|----------|
+  | `PreToolUse` | Before any tool runs | Lint before write, backup before edit |
+  | `PostToolUse` | After any tool runs | Auto-format, log commands |
+  | `Stop` | Agent finishes turn | Run tests, verify changes |
+  | `SessionStart` | Session begins | Set up environment |
+
+  ## Hook Types
+
+  - `command`: Run a shell command. `command` field is the shell command string.
+  - `prompt`: Inject text into the conversation. `prompt` field is the text.
+
+  ## Hook Matcher
+
+  The `matcher` field can be:
+  - Tool name: `"Bash"`, `"FileEdit"`, `"FileWrite"`
+  - Wildcard: `"*"` (matches all tools)
+  - With content: `"Bash(npm test)"` (matches specific commands)
+
+  ## Common Patterns
+
+  ### Auto-format on file save
+  ```json
+  { "PostToolUse": [{ "matcher": "FileWrite", "hooks": [{ "type": "command", "command": "prettier --write $TOOL_INPUT_FILE_PATH" }] }] }
+  ```
+
+  ### Run tests when agent stops
+  ```json
+  { "Stop": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "npm test" }] }] }
+  ```
+
+  ### Log all bash commands
+  ```json
+  { "PreToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "echo \"$(date): $TOOL_INPUT_COMMAND\" >> .claude/bash.log" }] }] }
+  ```
+
+  ## Verification
+
+  After writing a hook:
+  1. Validate JSON: `python3 -c "import json; json.load(open('.claude/settings.json'))"`
+  2. Test the hook fires by triggering the relevant tool
+  3. Check the hook's output/side effects
+
+  ## User Request
+
+  {{ args }}

@@ -1,0 +1,15 @@
+name: schedule
+description: Turn a task into a scheduled workflow with clear timing and verification.
+when_to_use: Use when the user wants a task run at a specific future time or interval.
+argument_hint: <scheduled-task>
+template: |
+  # Scheduling Helper
+
+  Scheduled task:
+  {{ user_request }}
+
+  Produce:
+  - A concrete schedule in absolute time terms
+  - Preconditions before the run starts
+  - Verification after it finishes
+  - Failure notifications or retry behavior

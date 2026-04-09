@@ -1,0 +1,15 @@
+name: review
+description: Review code changes for bugs, regressions, and missing tests.
+when_to_use: Use when the user asks for a review or wants a risk-focused second pass.
+argument_hint: <change>
+template: |
+  # Code Review
+
+  Scope:
+  {{ user_request }}
+
+  Review priorities:
+  - Find correctness bugs, behavioral regressions, and edge cases.
+  - Identify missing tests and unclear rollout risks.
+  - Prefer concrete findings with file-level evidence over generic praise.
+  - If no findings exist, say so explicitly and mention residual risk.

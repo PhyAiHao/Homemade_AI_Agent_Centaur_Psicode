@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "centaur-agent-ipc",
+  "version": "0.1.0",
+  "transport": {
+    "kind": "unix_socket",
+    "path": "/tmp/agent-ipc.sock",
+    "framing": {
+      "kind": "msgpack",
+      "lengthPrefixBytes": 4,
+      "byteOrder": "big-endian"
+    }
+  },
+  "messageTypes": [
+    {
+      "type": "api_request",
+      "direction": "rust_to_python",
+      "required": ["type", "request_id", "messages", "model"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "messages": { "type": "array", "items": { "type": "object" } },
+        "model": { "type": "string" },
+        "tools": { "type": "array", "items": { "type": "object" } },
+        "system_prompt": { "type": "string" },
+        "max_output_tokens": { "type": "integer" },
+        "metadata": { "type": "object" }
+      }
+    },
+    {
+      "type": "text_delta",
+      "direction": "python_to_rust",
+      "required": ["type", "request_id", "delta"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "delta": { "type": "string" }
+      }
+    },
+    {
+      "type": "tool_use",
+      "direction": "python_to_rust",
+      "required": ["type", "request_id", "tool_call_id", "name", "input"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "tool_call_id": { "type": "string" },
+        "name": { "type": "string" },
+        "input": { "type": "object" }
+      }
+    },
+    {
+      "type": "tool_result",
+      "direction": "rust_to_python",
+      "required": ["type", "request_id", "tool_call_id", "output"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "tool_call_id": { "type": "string" },
+        "output": {},
+        "is_error": { "type": "boolean" }
+      }
+    },
+    {
+      "type": "message_done",
+      "direction": "python_to_rust",
+      "required": ["type", "request_id", "usage"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "usage": { "type": "object" },
+        "stop_reason": { "type": "string" }
+      }
+    },
+    {
+      "type": "cost_request",
+      "direction": "rust_to_python",
+      "required": ["type", "request_id"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "reset": { "type": "boolean" }
+      }
+    },
+    {
+      "type": "cost_response",
+      "direction": "python_to_rust",
+      "required": ["type", "request_id", "usage", "diagnostics"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "usage": { "type": "object" },
+        "diagnostics": { "type": "object" }
+      }
+    },
+    {
+      "type": "memory_request",
+      "direction": "rust_to_python",
+      "required": ["type", "request_id", "action"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "action": { "type": "string" },
+        "payload": { "type": "object" }
+      }
+    },
+    {
+      "type": "memory_response",
+      "direction": "python_to_rust",
+      "required": ["type", "request_id", "ok"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "ok": { "type": "boolean" },
+        "payload": { "type": "object" },
+        "error": { "type": "string" }
+      }
+    },
+    {
+      "type": "compact_request",
+      "direction": "rust_to_python",
+      "required": ["type", "request_id", "messages"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "messages": { "type": "array", "items": { "type": "object" } },
+        "token_budget": { "type": "integer" }
+      }
+    },
+    {
+      "type": "compact_response",
+      "direction": "python_to_rust",
+      "required": ["type", "request_id", "summary"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "summary": { "type": "string" },
+        "messages": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    {
+      "type": "skill_request",
+      "direction": "rust_to_python",
+      "required": ["type", "request_id", "skill_name"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "skill_name": { "type": "string" },
+        "arguments": { "type": "object" }
+      }
+    },
+    {
+      "type": "skill_response",
+      "direction": "python_to_rust",
+      "required": ["type", "request_id", "content"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "content": { "type": "string" },
+        "metadata": { "type": "object" }
+      }
+    },
+    {
+      "type": "voice_start",
+      "direction": "rust_to_python",
+      "required": ["type", "request_id"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "language": { "type": "string" }
+      }
+    },
+    {
+      "type": "voice_transcript",
+      "direction": "python_to_rust",
+      "required": ["type", "request_id", "text"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "text": { "type": "string" },
+        "is_final": { "type": "boolean" }
+      }
+    },
+    {
+      "type": "output_style_request",
+      "direction": "rust_to_python",
+      "required": ["type", "request_id", "style_name"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "style_name": { "type": "string" }
+      }
+    },
+    {
+      "type": "output_style_response",
+      "direction": "python_to_rust",
+      "required": ["type", "request_id", "style"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "style": { "type": "object" }
+      }
+    }
+  ]
+}

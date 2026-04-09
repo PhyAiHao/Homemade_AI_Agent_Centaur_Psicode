@@ -1,0 +1,49 @@
+name: claude-in-chrome
+description: >
+  Automates your Chrome browser to interact with web pages - clicking elements,
+  filling forms, capturing screenshots, reading console logs, and navigating sites.
+  Opens pages in new tabs within your existing Chrome session.
+when_to_use: >
+  When the user wants to interact with web pages, automate browser tasks, capture
+  screenshots, read console logs, or perform any browser-based actions. Always invoke
+  BEFORE attempting to use any mcp__claude-in-chrome__* tools.
+user_invocable: true
+allowed_tools:
+  - "mcp__claude-in-chrome__*"
+argument_hint: "[task description]"
+
+template: |
+  # Chrome Browser Automation
+
+  You have access to browser automation tools (mcp__claude-in-chrome__*) for
+  interacting with web pages in Chrome.
+
+  ## Getting Started
+
+  At the start of each browser automation session:
+  1. Call `mcp__claude-in-chrome__tabs_context_mcp` to get current browser tabs
+  2. Only reuse an existing tab if the user explicitly asks to
+  3. Otherwise, create a new tab with `mcp__claude-in-chrome__tabs_create_mcp`
+
+  ## Guidelines
+
+  ### GIF Recording
+  For multi-step interactions, use `mcp__claude-in-chrome__gif_creator` to record them.
+  Capture extra frames before/after actions for smooth playback.
+
+  ### Console Debugging
+  Use `mcp__claude-in-chrome__read_console_messages` to read console output.
+  Use the `pattern` parameter with regex to filter verbose output.
+
+  ### Alerts and Dialogs
+  IMPORTANT: Do NOT trigger JavaScript alerts, confirms, or prompts. These block all
+  further browser events. Use `console.log` for debugging instead. If you must interact
+  with dialog-triggering elements, warn the user first.
+
+  ### Avoid Loops
+  If you encounter failures after 2-3 attempts, stop and ask the user for guidance.
+  Do not keep retrying the same failing action.
+
+  ## Task
+
+  {{ args }}

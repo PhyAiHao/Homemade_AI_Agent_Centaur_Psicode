@@ -1,0 +1,90 @@
+name: keybindings-help
+description: >
+  Use when the user wants to customize keyboard shortcuts, rebind keys, add chord
+  bindings, or modify ~/.claude/keybindings.json. Examples: "rebind ctrl+s",
+  "add a chord shortcut", "change the submit key", "customize keybindings".
+when_to_use: >
+  When the user mentions keybindings, keyboard shortcuts, key customization,
+  rebinding keys, or modifying keybindings.json.
+user_invocable: false
+allowed_tools:
+  - Read
+  - Edit
+  - Write
+argument_hint: "[keybinding request]"
+
+template: |
+  # Keybindings Skill
+
+  Create or modify `~/.claude/keybindings.json` to customize keyboard shortcuts.
+
+  ## CRITICAL: Read Before Write
+
+  **Always read `~/.claude/keybindings.json` first** (it may not exist yet).
+  Merge changes with existing bindings -- never replace the entire file.
+
+  - Use **Edit** tool for modifications to existing files
+  - Use **Write** tool only if the file does not exist yet
+
+  ## File Format
+
+  ```json
+  {
+    "$schema": "https://www.schemastore.org/claude-code-keybindings.json",
+    "$docs": "https://code.claude.com/docs/en/keybindings",
+    "bindings": [
+      {
+        "context": "Chat",
+        "bindings": {
+          "ctrl+e": "chat:externalEditor"
+        }
+      }
+    ]
+  }
+  ```
+
+  ## Keystroke Syntax
+
+  **Modifiers** (combine with `+`): `ctrl`, `alt`, `shift`, `meta`/`cmd`
+  **Special keys**: `escape`, `enter`, `tab`, `space`, `backspace`, `delete`, arrows
+  **Chords**: Space-separated, e.g. `ctrl+k ctrl+s` (1-second timeout)
+
+  ## Unbinding Defaults
+
+  Set a key to `null` to remove its default binding:
+  ```json
+  { "context": "Chat", "bindings": { "ctrl+s": null } }
+  ```
+
+  ## Common Patterns
+
+  ### Rebind a key
+  ```json
+  { "context": "Chat", "bindings": { "ctrl+g": null, "ctrl+e": "chat:externalEditor" } }
+  ```
+
+  ### Add a chord
+  ```json
+  { "context": "Global", "bindings": { "ctrl+k ctrl+t": "app:toggleTodos" } }
+  ```
+
+  ## Available Contexts
+  - Global: Always active
+  - Chat: When in the main chat input
+  - PermissionPrompt: When a permission dialog is shown
+  - HistorySearch: When searching history (Ctrl+R)
+
+  ## Available Actions
+  - chat:submit, chat:newline, chat:externalEditor, chat:historyPrev/Next
+  - chat:interrupt, chat:escape, chat:clearInput
+  - app:toggleTodos, app:toggleVim, app:help, app:quit
+  - nav:pageUp, nav:pageDown, nav:scrollToBottom
+
+  ## Rules
+  1. Only include contexts the user wants to change
+  2. Validate actions and contexts from the lists above
+  3. Warn about conflicts with reserved shortcuts (Ctrl+C, Ctrl+Z, Ctrl+D)
+
+  ## User Request
+
+  {{ args }}

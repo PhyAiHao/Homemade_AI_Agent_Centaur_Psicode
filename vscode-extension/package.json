@@ -1,0 +1,77 @@
+{
+  "name": "centaur-psicode",
+  "displayName": "Centaur Psicode AI Agent",
+  "description": "AI Agent for software engineering — chat sidebar with tool execution",
+  "version": "0.1.0",
+  "publisher": "centaur-psicode",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["AI", "Chat"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "centaur-psicode",
+          "title": "Centaur Psicode",
+          "icon": "$(hubot)"
+        }
+      ]
+    },
+    "views": {
+      "centaur-psicode": [
+        {
+          "type": "webview",
+          "id": "centaur-psicode.chat",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "centaur-psicode.startAgent",
+        "title": "Centaur Psicode: Start AI Agent"
+      },
+      {
+        "command": "centaur-psicode.stopAgent",
+        "title": "Centaur Psicode: Stop AI Agent"
+      },
+      {
+        "command": "centaur-psicode.sendSelection",
+        "title": "Centaur Psicode: Send Selection to Agent"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "centaur-psicode.sendSelection",
+          "when": "editorHasSelection",
+          "group": "centaur-psicode"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "centaur-psicode.startAgent",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

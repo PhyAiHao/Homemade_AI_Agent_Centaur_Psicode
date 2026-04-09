@@ -1,0 +1,15 @@
+name: debug
+description: Investigate a bug systematically and narrow the likely cause.
+when_to_use: Use when the user has a failing behavior, crash, or confusing output to diagnose.
+argument_hint: <bug>
+template: |
+  # Debug Assistant
+
+  Problem:
+  {{ user_request }}
+
+  Debugging flow:
+  - Reproduce the issue as narrowly as possible.
+  - Form 2-3 candidate hypotheses.
+  - Collect evidence that can eliminate hypotheses quickly.
+  - End with the most likely cause, confidence, and next fix step.

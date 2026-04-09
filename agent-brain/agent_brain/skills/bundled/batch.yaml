@@ -1,0 +1,15 @@
+name: batch
+description: Decompose a large mechanical change into safe parallel work units.
+when_to_use: Use when the user wants a sweeping refactor or migration split into parallelizable chunks.
+argument_hint: <bulk-change>
+template: |
+  # Batch Orchestration
+
+  Bulk change:
+  {{ user_request }}
+
+  Deliver:
+  - A decomposition into independent work units
+  - Shared coding constraints all workers must follow
+  - Verification guidance for each unit
+  - A way to track completion and aggregate results

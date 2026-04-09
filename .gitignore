@@ -1,0 +1,51 @@
+# Environment
+.env
+.env.local
+
+# Rust build artifacts
+agent-core/target/
+**/*.rs.bak
+
+# Python artifacts
+agent-brain/__pycache__/
+agent-brain/**/__pycache__/
+agent-brain/*.egg-info/
+agent-brain/.venv/
+agent-brain/dist/
+agent-brain/build/
+**/*.pyc
+**/*.pyo
+.pytest_cache/
+
+# TypeScript / Node
+agent-integrations/node_modules/
+agent-integrations/dist/
+agent-integrations/*.tsbuildinfo
+
+# IPC socket
+/tmp/agent-ipc.sock
+
+# Editor
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Test output
+coverage/
+*.lcov
+
+# VS Code extension
+vscode-extension/node_modules/
+vscode-extension/out/
+
+# ChromaDB vectors (runtime data)
+**/vectors/
+
+# Node lock files (optional — remove if you want to pin)
+package-lock.json

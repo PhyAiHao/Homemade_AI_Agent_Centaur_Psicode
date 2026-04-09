@@ -1,0 +1,59 @@
+# ═══════════════════════════════════════════════════════════════
+# Crew Template: Research Report
+# Usage: "Run the research_report crew on topic: LLM memory systems"
+# ═══════════════════════════════════════════════════════════════
+
+name: research_report
+description: A 2-agent crew that researches a topic and writes a structured report.
+process: sequential
+verbose: true
+
+agents:
+  - name: researcher
+    role: Research Analyst
+    goal: >
+      Thoroughly research the given topic. Gather key facts, compare
+      approaches, identify trade-offs, and note open questions.
+    backstory: >
+      You are a meticulous research analyst who reads primary sources,
+      cross-references claims, and structures findings logically.
+      You distinguish facts from opinions.
+    llm: claude-sonnet-4-6
+    verbose: true
+    allow_delegation: false
+
+  - name: writer
+    role: Technical Writer
+    goal: >
+      Transform raw research into a polished, well-structured report
+      with clear sections, comparisons, and recommendations.
+    backstory: >
+      You write technical documents that are both comprehensive and
+      readable. You use tables, bullet points, and clear headings.
+      You always include a TL;DR at the top.
+    llm: claude-sonnet-4-6
+    verbose: false
+    allow_delegation: false
+
+tasks:
+  - description: >
+      Research the topic thoroughly. Cover:
+      1. What it is and why it matters
+      2. Key approaches/implementations (at least 3)
+      3. Trade-offs and comparisons
+      4. Current state of the art
+      5. Open problems and future directions
+    expected_output: >
+      Structured research notes with sections, bullet points, and
+      specific examples. Include sources where possible.
+    agent: researcher
+
+  - description: >
+      Write a polished report from the research notes.
+      Structure: TL;DR, Introduction, Approaches (with comparison table),
+      Analysis, Recommendations, Conclusion.
+      Keep it under 2000 words.
+    expected_output: >
+      A complete markdown report ready to share with a team.
+    agent: writer
+    context_indices: [0]

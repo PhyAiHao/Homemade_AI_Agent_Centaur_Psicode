@@ -1,0 +1,43 @@
+name: wiki-init
+description: Bootstrap a new wiki by ingesting a source document or URL
+when_to_use: >
+  When the user wants to start a new wiki, ingest a document into the knowledge
+  base, add a URL or file to the wiki, or create initial wiki pages from content.
+template: |
+  Bootstrap the wiki by ingesting the provided source into the knowledge base.
+
+  Steps:
+  1. Determine the source type:
+     - If a URL was provided: use source_type="web", source_url=<url>
+     - If a file path was provided: use source_type="file", source_url=<path>
+     - If content was pasted inline: use source_type="manual"
+
+  2. Send a wiki_ingest memory request with:
+     - content: the full source text (or fetch the URL first)
+     - title: a descriptive title for the source
+     - source_type: "web" | "file" | "manual"
+     - source_url: the original URL or file path
+     - tags: relevant topic tags (lowercase, hyphenated)
+
+  3. The ingest will:
+     - Create a summary page for the source
+     - Extract entity pages for key nouns (people, projects, tools, APIs)
+     - Extract concept pages for key ideas (patterns, principles, methods)
+     - Cross-reference pages with [[slug]] links
+     - Append an entry to wiki/log.md
+
+  4. After ingestion, report:
+     - How many pages were created or updated
+     - What the top entities and concepts were
+     - Any pages that need follow-up (missing context, broken references)
+
+  5. Suggest running /wiki-lint afterward to verify wiki health.
+
+  Wiki schema conventions (from WIKI_SCHEMA.md if present):
+  - Titles: noun phrases, title case
+  - One concept per page; split if body exceeds 50 lines
+  - Tags: lowercase, hyphenated (#api-design, #auth)
+  - Dates: always absolute (2026-04-08), never relative
+  - Cross-reference with [[slug]] syntax
+
+  {{ user_request }}

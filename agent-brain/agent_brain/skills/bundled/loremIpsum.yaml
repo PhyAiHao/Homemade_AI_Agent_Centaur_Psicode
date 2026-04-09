@@ -1,0 +1,26 @@
+name: lorem-ipsum
+description: >
+  Generate filler text for long context testing. Specify token count as
+  argument (e.g., /lorem-ipsum 50000). Defaults to 10000 tokens.
+when_to_use: >
+  When the user wants to generate filler/placeholder text for testing
+  context windows, token limits, or compaction behavior.
+user_invocable: true
+allowed_tools: []
+argument_hint: "[token_count]"
+
+template: |
+  # Lorem Ipsum Generator
+
+  Generate approximately {{ args | default("10000") }} tokens of filler text.
+
+  Use a mix of realistic-looking English paragraphs covering diverse topics:
+  technology, science, history, philosophy, nature, and everyday life.
+  Each paragraph should be 100-200 words. Add section headers every 3-4
+  paragraphs for structure.
+
+  Do NOT use actual Lorem Ipsum Latin text. Use readable English that
+  approximates real content. This is for testing context windows and
+  token budgets.
+
+  Start generating now. Do not ask for confirmation.

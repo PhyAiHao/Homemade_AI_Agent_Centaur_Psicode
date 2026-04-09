@@ -1,0 +1,107 @@
+name: skillify
+description: >
+  Capture this session's repeatable process into a reusable skill.
+  Call at end of the process you want to capture with an optional description.
+when_to_use: >
+  When the user wants to save the current session's workflow as a reusable skill
+  that can be replayed later. Usually invoked at the end of a multi-step process.
+user_invocable: true
+allowed_tools:
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Grep
+  - AskUser
+  - "Bash(mkdir:*)"
+argument_hint: "[description of the process to capture]"
+
+template: |
+  # Skillify
+
+  You are capturing this session's repeatable process as a reusable skill.
+
+  ## Your Task
+
+  ### Step 1: Analyze the Session
+
+  Before asking questions, analyze the conversation to identify:
+  - What repeatable process was performed
+  - What the inputs/parameters were
+  - The distinct steps (in order)
+  - The success criteria for each step
+  - Where the user corrected or steered you
+  - What tools and permissions were needed
+  - What the goals and artifacts were
+
+  ### Step 2: Interview the User
+
+  Use AskUser for ALL questions.
+
+  **Round 1: High level**
+  - Suggest a name and description
+  - Suggest goals and success criteria
+
+  **Round 2: Details**
+  - Present the steps as a numbered list
+  - Ask about arguments the skill needs
+  - Ask if it should run inline or as a sub-agent (fork)
+  - Ask where to save:
+    - **This repo**: `.claude/skills/<name>/SKILL.md`
+    - **Personal**: `~/.claude/skills/<name>/SKILL.md`
+
+  **Round 3: Per-step breakdown**
+  For each step, clarify:
+  - What does this step produce?
+  - What proves success?
+  - Should the user confirm before proceeding?
+  - Can any steps run in parallel?
+
+  **Round 4: Final**
+  - Confirm invocation trigger phrases
+  - Ask for gotchas or warnings
+
+  ### Step 3: Write the SKILL.md
+
+  Use this format:
+
+  ```markdown
+  ---
+  name: {{ skill_name }}
+  description: "{{ one_line_description }}"
+  allowed-tools:
+    {{ tool_list }}
+  when_to_use: "{{ trigger_description }}"
+  argument-hint: "{{ argument_placeholders }}"
+  ---
+
+  # {{ Skill Title }}
+
+  {{ Description }}
+
+  ## Inputs
+  - `$arg_name`: {{ description }}
+
+  ## Goal
+  {{ Clear goal with success criteria }}
+
+  ## Steps
+
+  ### 1. {{ Step Name }}
+  {{ What to do }}
+
+  **Success criteria**: {{ How to know this step is done }}
+  ```
+
+  ### Step 4: Confirm and Save
+
+  Show the complete SKILL.md as a code block for review.
+  Ask for confirmation before writing.
+  After saving, tell the user:
+  - Where it was saved
+  - How to invoke: `/{{ skill_name }} [arguments]`
+  - That they can edit SKILL.md directly to refine it
+
+  ## User Description
+
+  {{ args }}

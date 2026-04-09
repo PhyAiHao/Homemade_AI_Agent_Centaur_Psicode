@@ -1,0 +1,15 @@
+name: claudeApi
+description: Help design or explain usage of the Claude API and related integrations.
+when_to_use: Use when the user wants help building with the Claude API or understanding model/tool usage.
+argument_hint: <api-task>
+template: |
+  # Claude API Helper
+
+  Request:
+  {{ user_request }}
+
+  Focus:
+  - Choose the right API surface for the task
+  - Explain request/response shape clearly
+  - Call out streaming, tools, auth, and error-handling concerns
+  - Prefer examples that can be adapted directly into code

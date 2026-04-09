@@ -1,0 +1,18 @@
+{
+  "plugins": [
+    {
+      "name": "core-assistant",
+      "description": "Baseline built-in plugin metadata for the Agent B plugin system.",
+      "version": "1.0.0",
+      "default_enabled": true,
+      "hooks": {}
+    },
+    {
+      "name": "qa-pack",
+      "description": "Optional built-in QA-oriented plugin placeholder.",
+      "version": "1.0.0",
+      "default_enabled": false,
+      "hooks": {}
+    }
+  ]
+}

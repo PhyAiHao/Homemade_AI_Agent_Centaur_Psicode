@@ -1,0 +1,56 @@
+name: crewai
+description: Run a multi-agent CrewAI crew for tasks requiring multiple roles
+when_to_use: >
+  When the user asks to run a multi-agent workflow, coordinate multiple AI roles,
+  use CrewAI, or when a task would benefit from distinct perspectives (e.g.,
+  researcher + writer, coder + reviewer, analyst + presenter).
+template: |
+  The user wants to run a CrewAI crew. You have two options:
+
+  **Option 1: Use an existing crew template (recommended)**
+  First, list available templates:
+  ```json
+  {"list_crews": true}
+  ```
+  Then run one by name:
+  ```json
+  {"crew_name": "code_review", "inputs": {"topic": "the auth module"}}
+  ```
+
+  **Option 2: Build a custom crew inline**
+  If no template fits, create a custom crew config:
+
+  Step 1: Identify 2-4 distinct agent roles needed for this task.
+  Step 2: Break the work into sequential tasks.
+  Step 3: Call CrewAI with:
+  ```json
+  {
+    "crew_config": {
+      "agents": [
+        {"name": "researcher", "role": "Research Analyst", "goal": "...", "backstory": "...", "llm": "claude-sonnet-4-6"},
+        {"name": "writer", "role": "Content Writer", "goal": "...", "backstory": "...", "llm": "claude-sonnet-4-6"}
+      ],
+      "tasks": [
+        {"description": "Research...", "expected_output": "...", "agent": "researcher"},
+        {"description": "Write...", "expected_output": "...", "agent": "writer", "context_indices": [0]}
+      ],
+      "process": "sequential"
+    },
+    "inputs": {}
+  }
+  ```
+
+  **Customizing sub-agents:**
+  Each agent has these fields you can tune:
+  - `role`: Job title (e.g., "Senior Security Engineer")
+  - `goal`: What the agent aims to achieve
+  - `backstory`: Expertise and personality — this shapes how the agent thinks
+  - `llm`: Which model to use (claude-sonnet-4-6, gpt-4o, llama3.1:latest, etc.)
+  - `verbose`: Show detailed reasoning (true/false)
+  - `allow_delegation`: Can this agent ask other agents for help (true/false)
+
+  **Creating new templates:**
+  Users can create YAML files in `agent-brain/agent_brain/crews/` following
+  the same format as `code_review.yaml` or `research_report.yaml`.
+
+  User request: {{ user_request }}

@@ -1,0 +1,15 @@
+name: ultraplan
+description: Break a large task into a staged execution plan with verification gates.
+when_to_use: Use when the user wants a deep implementation plan before coding.
+argument_hint: <project>
+template: |
+  # Ultraplan
+
+  Project:
+  {{ user_request }}
+
+  Plan requirements:
+  - Define phases, milestones, and decision points.
+  - Surface hidden dependencies and risky assumptions.
+  - Include validation steps for each major stage.
+  - Prefer plans that can be executed incrementally without losing momentum.

@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/phyaihao/Desktop"]
+    },
+    "puppeteer": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-puppeteer"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "ghp_your_token" }
+    },
+    "sqlite": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sqlite", "path/to/db.sqlite"]
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": { "BRAVE_API_KEY": "your_key" }
+    }
+  }
+}

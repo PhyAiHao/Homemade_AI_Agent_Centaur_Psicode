@@ -1,0 +1,15 @@
+name: remember
+description: Review durable context and decide what should be kept in memory.
+when_to_use: Use when the user wants to remember, organize, or clean up persistent memory.
+argument_hint: <context>
+template: |
+  # Memory Review
+
+  User request:
+  {{ user_request }}
+
+  Instructions:
+  - Look for durable user preferences, project context, feedback, and external references.
+  - Do not save code structure or temporary task state as memory.
+  - Group proposals into save, update, remove, or ignore.
+  - Explain why each proposed memory will matter in future conversations.

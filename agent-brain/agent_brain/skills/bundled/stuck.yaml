@@ -1,0 +1,81 @@
+name: stuck
+description: >
+  Investigate frozen/stuck/slow AI agent sessions on this machine and
+  generate a diagnostic report.
+when_to_use: >
+  When the user reports a frozen, stuck, or very slow session. Also useful
+  for general process diagnostics.
+user_invocable: true
+allowed_tools:
+  - Bash
+  - Read
+argument_hint: "[optional: PID or symptom description]"
+
+template: |
+  # /stuck — Diagnose Frozen/Slow Sessions
+
+  The user thinks a session on this machine is frozen, stuck, or very slow.
+  Investigate and produce a diagnostic report.
+
+  ## What to Look For
+
+  Signs of a stuck session:
+  - **High CPU (>=90%) sustained** — likely an infinite loop
+  - **Process state `D`** — uninterruptible I/O sleep (hang)
+  - **Process state `T`** — stopped (accidental Ctrl+Z)
+  - **Process state `Z`** — zombie (parent not reaping)
+  - **Very high RSS (>=4GB)** — possible memory leak
+  - **Stuck child process** — hung `git`, `node`, or shell subprocess
+
+  ## Investigation Steps
+
+  ### 1. List All Agent Processes
+
+  ```bash
+  ps -axo pid=,pcpu=,rss=,etime=,state=,comm=,command= | grep -E '(agent|claude|cli)' | grep -v grep
+  ```
+
+  ### 2. For Suspicious Processes
+
+  - Child processes: `pgrep -lP <pid>`
+  - If high CPU: sample again after 1-2s to confirm sustained
+  - If a child looks hung: `ps -p <child_pid> -o command=`
+  - Check debug log: `~/.claude/debug/<session-id>.txt` (last few hundred lines)
+
+  ### 3. Stack Dump (Advanced, Optional)
+
+  For a truly frozen process:
+  - macOS: `sample <pid> 3` (3-second native stack sample)
+  - Linux: `strace -p <pid> -c` (brief syscall summary)
+
+  ## Report Format
+
+  Produce a structured diagnostic:
+
+  ```
+  DIAGNOSTIC REPORT
+  =================
+  Hostname: <hostname>
+  Time: <timestamp>
+
+  SESSIONS FOUND:
+  PID     CPU%    RSS     State   Uptime    Command
+  -----   -----   ------  -----   --------  -------
+  <data>
+
+  DIAGNOSIS:
+  - <findings for each suspicious process>
+
+  RECOMMENDATION:
+  - <what the user should do>
+  ```
+
+  ## Rules
+
+  - Do NOT kill or signal any processes — diagnostic only
+  - Only report problems you actually find
+  - If everything looks healthy, say so directly
+
+  ## User Context
+
+  {{ args }}

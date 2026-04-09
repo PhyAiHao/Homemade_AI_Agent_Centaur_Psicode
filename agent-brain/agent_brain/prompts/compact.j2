@@ -1,0 +1,22 @@
+# Compact Summary
+
+Primary request: {{ primary_request }}
+
+Budget:
+- Requested budget: {{ requested_budget }}
+- Effective keep budget: {{ effective_budget }}
+- Estimated tokens before: {{ estimated_tokens_before }}
+- Estimated tokens after: {{ estimated_tokens_after }}
+
+Compaction effects:
+- Messages kept: {{ messages_kept }} / {{ messages_total }}
+- Messages removed: {{ messages_removed }}
+- Tool results micro-compacted: {{ tool_results_microcompacted }}
+- Approximate characters saved from tool results: {{ chars_saved }}
+
+Highlights:
+{% for item in highlights %}
+- {{ item }}
+{% endfor %}
+
+{{ session_memory }}

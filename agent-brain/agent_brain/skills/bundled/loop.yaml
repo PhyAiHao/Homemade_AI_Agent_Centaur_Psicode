@@ -1,0 +1,15 @@
+name: loop
+description: Define a recurring prompt or recurring automation loop with safe stopping conditions.
+when_to_use: Use when the user wants repeated execution on a cadence or watch cycle.
+argument_hint: <loop-task>
+template: |
+  # Loop Planning
+
+  Recurring task:
+  {{ user_request }}
+
+  Define:
+  - Trigger or cadence
+  - Inputs to check each run
+  - Safe stop conditions and failure handling
+  - What should be persisted between runs

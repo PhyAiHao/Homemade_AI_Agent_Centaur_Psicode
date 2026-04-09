@@ -1,0 +1,17 @@
+name: commit
+description: Prepare a focused commit with a clear rationale and validation notes.
+when_to_use: Use when the user wants help turning finished work into a clean commit.
+argument_hint: <goal>
+template: |
+  # Commit Helper
+
+  Goal: turn the current work into one focused commit.
+
+  User request:
+  {{ user_request }}
+
+  Steps:
+  - Inspect the current diff and identify the smallest coherent commit boundary.
+  - Write a short imperative commit message that explains the behavior change.
+  - Summarize validation already run and any missing verification.
+  - Flag risky mixed concerns that should be split before committing.

@@ -1,0 +1,15 @@
+name: verify
+description: Verify a change works by checking the real behavior rather than just the diff.
+when_to_use: Use when the user wants confidence that a change actually works end to end.
+argument_hint: <change>
+template: |
+  # Verification
+
+  Change to verify:
+  {{ user_request }}
+
+  Verification checklist:
+  - Identify the intended behavior change.
+  - Run the narrowest tests that prove that behavior.
+  - If possible, perform one realistic end-to-end validation.
+  - Report what was verified, what was not, and the remaining risk.

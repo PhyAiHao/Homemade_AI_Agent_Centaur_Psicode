@@ -1,0 +1,15 @@
+name: simplify
+description: Reduce complexity in code or plans without changing intended behavior.
+when_to_use: Use when code or explanations feel overbuilt and should be made clearer.
+argument_hint: <target>
+template: |
+  # Simplify
+
+  Target:
+  {{ user_request }}
+
+  Simplification rules:
+  - Remove unnecessary abstraction, branching, or repetition.
+  - Preserve behavior and make tradeoffs explicit.
+  - Prefer smaller, clearer helpers over clever generic machinery.
+  - Explain what became simpler and why.

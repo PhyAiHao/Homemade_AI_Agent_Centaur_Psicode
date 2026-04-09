@@ -1,0 +1,158 @@
+[package]
+name        = "agent"
+version     = "0.1.0"
+edition     = "2021"
+description = "Centaur Psicode — AI agent core (Rust)"
+license     = "MIT"
+
+[[bin]]
+name = "agent"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio              = { version = "1",     features = ["full"] }
+tokio-util         = "0.7"              # CancellationToken for abort system
+
+# HTTP client + SSE streaming
+reqwest            = { version = "0.12",  features = ["stream", "json", "rustls-tls"], default-features = false }
+eventsource-stream = "0.2"
+
+# Serialization
+serde              = { version = "1",     features = ["derive"] }
+serde_json         = "1"
+rmp-serde          = "1.3"          # msgpack via rmp
+
+# CLI parsing
+clap               = { version = "4",     features = ["derive", "env"] }
+
+# Terminal UI
+ratatui            = "0.29"
+crossterm          = { version = "0.28",  features = ["event-stream"] }
+
+# Flex layout (replaces yoga-layout)
+taffy              = "0.5"
+
+# File search
+globset            = "0.4"
+ignore             = "0.4"          # .gitignore-aware walk + file indexing
+pathdiff           = "0.2"          # relative path computation
+
+# Content search (ripgrep library)
+grep-matcher       = "0.1"
+grep-regex         = "0.1"
+grep-searcher      = "0.1"
+
+# Git operations
+git2               = { version = "0.19", default-features = false }
+
+# Diff (replaces color-diff)
+similar            = { version = "2",    features = ["text"] }
+
+# WebSocket
+tokio-tungstenite  = { version = "0.24", features = ["native-tls"] }
+
+# Secure credential storage (macOS Keychain)
+keyring            = "3"
+
+# JWT
+jsonwebtoken       = "9"
+
+# File watching (FSEvents on macOS)
+notify             = { version = "7",    features = ["macos_fsevent"] }
+
+# Temp files
+tempfile           = "3"
+
+# Error handling
+anyhow             = "1"
+thiserror          = "2"
+
+# Logging / tracing
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-opentelemetry = { version = "0.27", optional = true }
+opentelemetry      = { version = "0.26", optional = true }
+opentelemetry_sdk  = { version = "0.26", features = ["rt-tokio"], optional = true }
+
+# Unicode
+unicode-width      = "0.2"
+unicode-bidi       = "0.3"
+
+# PDF reading (optional — feature "pdf")
+pdf-extract        = { version = "0.7", optional = true }
+
+# Base64 (image encoding)
+base64             = "0.22"
+
+# Cron scheduling (optional — feature "cron")
+cron               = { version = "0.13", optional = true }
+
+# UUID generation
+uuid               = { version = "1", features = ["v4"] }
+
+# Time
+chrono             = { version = "0.4", features = ["serde"] }
+
+# Path utilities
+dirs               = "5"
+filetime           = "0.2"          # Set file mtime (for dream lock rollback)
+
+# Environment loading
+dotenvy            = "0.15"
+
+# Async utilities
+futures            = "0.3"
+async-trait        = "0.1"
+
+# Process management
+nix                = { version = "0.29", features = ["process", "signal"] }
+
+# Regex (used by GrepTool)
+regex              = "1"
+
+# URL encoding (used by WebSearchTool)
+urlencoding        = "2"
+
+# ─── Feature flags (Principle 5: Compile-Time Elimination) ──────────────
+[features]
+default = ["pdf", "cron", "telemetry", "buddy", "computer_use", "swarm", "voice"]
+
+# PDF file reading support (adds pdf-extract dependency)
+pdf = ["dep:pdf-extract"]
+
+# Cron job scheduling (adds cron dependency)
+cron = ["dep:cron"]
+
+# OpenTelemetry telemetry export
+telemetry = ["dep:tracing-opentelemetry", "dep:opentelemetry", "dep:opentelemetry_sdk"]
+
+# Companion buddy sprite in TUI
+buddy = []
+
+# Computer use (screenshot, mouse, keyboard automation)
+computer_use = []
+
+# Multi-agent swarm coordination (tmux, in-process teammates)
+swarm = []
+
+# Voice input (STT) — requires Python agent-brain voice module
+voice = []
+
+# Minimal build: just the core agent loop + tools + TUI, no optional features
+# Build with: cargo build --release --no-default-features
+minimal = []
+
+[dev-dependencies]
+tokio-test         = "0.4"
+tempfile           = "3"
+
+[profile.release]
+opt-level     = 3
+lto           = true
+codegen-units = 1
+strip         = true
+
+[profile.dev]
+opt-level = 0
+debug     = true

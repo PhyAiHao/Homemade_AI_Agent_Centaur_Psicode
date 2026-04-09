@@ -1,0 +1,81 @@
+# ═══════════════════════════════════════════════════════════════
+# Crew Template: Code Review
+# Usage: "Run the code_review crew on the auth module"
+# ═══════════════════════════════════════════════════════════════
+
+name: code_review
+description: A 3-agent crew that reviews code for bugs, security, and quality.
+process: sequential   # or "hierarchical"
+verbose: true
+
+# ── Sub-Agents (customize these!) ─────────────────────────────
+agents:
+  - name: security_auditor
+    role: Security Auditor
+    goal: >
+      Find security vulnerabilities including OWASP Top 10,
+      injection flaws, auth bypasses, and data exposure risks.
+    backstory: >
+      You are a senior application security engineer with 10 years
+      of experience in penetration testing and secure code review.
+      You think like an attacker.
+    llm: claude-sonnet-4-6        # which model this agent uses
+    verbose: true
+    allow_delegation: false       # can this agent delegate to others?
+
+  - name: code_reviewer
+    role: Senior Code Reviewer
+    goal: >
+      Review code for correctness, readability, maintainability,
+      and adherence to best practices. Find bugs and logic errors.
+    backstory: >
+      You are a principal engineer who has reviewed thousands of PRs.
+      You care about clean architecture, proper error handling, and
+      test coverage. You are thorough but pragmatic.
+    llm: claude-sonnet-4-6
+    verbose: true
+    allow_delegation: false
+
+  - name: report_writer
+    role: Technical Report Writer
+    goal: >
+      Synthesize the security audit and code review into a clear,
+      actionable report with prioritized findings.
+    backstory: >
+      You write technical reports that engineering managers actually
+      read. You prioritize findings by severity and provide concrete
+      fix recommendations.
+    llm: claude-sonnet-4-6
+    verbose: false
+    allow_delegation: false
+
+# ── Tasks (the workflow) ──────────────────────────────────────
+tasks:
+  - description: >
+      Perform a security audit of the provided code.
+      Check for: injection, auth issues, data exposure, SSRF,
+      insecure deserialization, and hardcoded secrets.
+      List each finding with severity (Critical/High/Medium/Low).
+    expected_output: >
+      A security findings list in markdown with severity, location,
+      and recommended fix for each issue.
+    agent: security_auditor
+
+  - description: >
+      Review the code for quality, correctness, and maintainability.
+      Check for: logic errors, race conditions, error handling gaps,
+      naming quality, unnecessary complexity, missing tests.
+    expected_output: >
+      A code quality report in markdown with categorized findings
+      and specific improvement suggestions.
+    agent: code_reviewer
+
+  - description: >
+      Combine the security audit and code review into a single
+      executive report. Prioritize all findings by business impact.
+      Include a summary table and recommended action items.
+    expected_output: >
+      A combined report with: executive summary, prioritized findings
+      table (severity + category + location + fix), and next steps.
+    agent: report_writer
+    context_indices: [0, 1]       # receives output from tasks 0 and 1

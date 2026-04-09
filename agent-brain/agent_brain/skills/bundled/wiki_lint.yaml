@@ -1,0 +1,20 @@
+name: wiki-lint
+description: Run a health check on the wiki/memory system
+when_to_use: >
+  When the user asks to check wiki health, find orphan pages, clean up
+  memories, verify wiki consistency, or audit the knowledge base.
+template: |
+  Run a wiki health check. Use the MemoryRecall tool or send a wiki_lint
+  memory request to get a structural report.
+
+  The report will show:
+  1. **Orphan pages** -- memories with no backlinks and low access (suggest deletion or linking)
+  2. **Broken references** -- [[slug]] links pointing to deleted pages (suggest removing or creating)
+  3. **Stale content** -- memories not accessed in 60+ days (suggest demoting or updating)
+  4. **Missing pages** -- concepts mentioned in 2+ pages but lacking their own page (suggest creating)
+  5. **Stats** -- total pages, core vs archive split, top tags
+
+  For each issue found, explain the problem and suggest a fix.
+  Ask the user before applying any changes.
+
+  {{ user_request }}

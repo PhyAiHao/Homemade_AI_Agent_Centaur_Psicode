@@ -1,0 +1,206 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Centaur Psicode IPC Schema",
+  "description": "Message protocol between agent-core (Rust) and agent-brain (Python) over Unix domain socket with msgpack framing (4-byte LE length prefix).",
+  "version": "1.0.0",
+  "transport": {
+    "socket_path": "/tmp/agent-ipc.sock",
+    "framing": "4-byte little-endian length prefix followed by msgpack payload",
+    "encoding": "msgpack"
+  },
+  "message_types": {
+    "api_request": {
+      "direction": "Rust → Python",
+      "description": "Send full conversation to Claude API",
+      "fields": {
+        "type":       { "type": "string", "const": "api_request" },
+        "request_id": { "type": "string", "description": "UUID for correlating responses" },
+        "model":      { "type": "string", "example": "claude-sonnet-4-6" },
+        "messages":   { "type": "array",  "description": "Anthropic message array" },
+        "tools":      { "type": "array",  "description": "Tool definitions array" },
+        "system":     { "type": "string", "description": "System prompt" },
+        "max_tokens": { "type": "integer" },
+        "thinking":   { "type": "boolean", "default": false }
+      },
+      "required": ["type", "request_id", "model", "messages"]
+    },
+    "text_delta": {
+      "direction": "Python → Rust",
+      "description": "Streaming text token from Claude",
+      "fields": {
+        "type":       { "type": "string", "const": "text_delta" },
+        "request_id": { "type": "string" },
+        "delta":      { "type": "string" },
+        "index":      { "type": "integer", "description": "Content block index" }
+      },
+      "required": ["type", "request_id", "delta"]
+    },
+    "tool_use": {
+      "direction": "Python → Rust",
+      "description": "Claude requested a tool execution",
+      "fields": {
+        "type":        { "type": "string", "const": "tool_use" },
+        "request_id":  { "type": "string" },
+        "tool_use_id": { "type": "string", "description": "Unique ID for this tool call" },
+        "name":        { "type": "string", "description": "Tool name" },
+        "input":       { "type": "object", "description": "Tool input arguments" }
+      },
+      "required": ["type", "request_id", "tool_use_id", "name", "input"]
+    },
+    "tool_result": {
+      "direction": "Rust → Python",
+      "description": "Result of tool execution, sent back to continue the conversation",
+      "fields": {
+        "type":        { "type": "string", "const": "tool_result" },
+        "request_id":  { "type": "string" },
+        "tool_use_id": { "type": "string" },
+        "content":     { "type": "string", "description": "Tool output as string" },
+        "is_error":    { "type": "boolean", "default": false }
+      },
+      "required": ["type", "request_id", "tool_use_id", "content"]
+    },
+    "message_done": {
+      "direction": "Python → Rust",
+      "description": "Final message completion with usage stats",
+      "fields": {
+        "type":        { "type": "string", "const": "message_done" },
+        "request_id":  { "type": "string" },
+        "stop_reason": { "type": "string", "enum": ["end_turn", "tool_use", "max_tokens", "stop_sequence"] },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "input_tokens":  { "type": "integer" },
+            "output_tokens": { "type": "integer" },
+            "cache_read_input_tokens":    { "type": "integer" },
+            "cache_creation_input_tokens": { "type": "integer" }
+          }
+        }
+      },
+      "required": ["type", "request_id", "stop_reason", "usage"]
+    },
+    "memory_request": {
+      "direction": "Rust → Python",
+      "description": "Load or save memory files",
+      "fields": {
+        "type":       { "type": "string", "const": "memory_request" },
+        "request_id": { "type": "string" },
+        "operation":  { "type": "string", "enum": ["load", "save", "list", "delete"] },
+        "path":       { "type": "string", "description": "Memory file path (for save/delete)" },
+        "content":    { "type": "string", "description": "Memory content (for save)" }
+      },
+      "required": ["type", "request_id", "operation"]
+    },
+    "memory_response": {
+      "direction": "Python → Rust",
+      "description": "Memory content or operation confirmation",
+      "fields": {
+        "type":       { "type": "string", "const": "memory_response" },
+        "request_id": { "type": "string" },
+        "content":    { "type": "string", "description": "Memory content or injected system prompt fragment" },
+        "entries":    { "type": "array",  "description": "List of memory entries (for list operation)" },
+        "success":    { "type": "boolean" }
+      },
+      "required": ["type", "request_id", "success"]
+    },
+    "compact_request": {
+      "direction": "Rust → Python",
+      "description": "Request conversation history compression",
+      "fields": {
+        "type":       { "type": "string", "const": "compact_request" },
+        "request_id": { "type": "string" },
+        "strategy":   { "type": "string", "enum": ["auto", "snip", "micro"], "default": "auto" },
+        "messages":   { "type": "array",  "description": "Full conversation history to compress" },
+        "token_budget": { "type": "integer", "description": "Target token count after compression" }
+      },
+      "required": ["type", "request_id", "messages"]
+    },
+    "compact_response": {
+      "direction": "Python → Rust",
+      "description": "Compressed conversation history",
+      "fields": {
+        "type":             { "type": "string", "const": "compact_response" },
+        "request_id":       { "type": "string" },
+        "messages":         { "type": "array", "description": "Compressed message array" },
+        "tokens_before":    { "type": "integer" },
+        "tokens_after":     { "type": "integer" }
+      },
+      "required": ["type", "request_id", "messages"]
+    },
+    "skill_request": {
+      "direction": "Rust → Python",
+      "description": "Expand a named skill into a prompt",
+      "fields": {
+        "type":       { "type": "string", "const": "skill_request" },
+        "request_id": { "type": "string" },
+        "skill_name": { "type": "string" },
+        "args":       { "type": "object", "description": "Template variables for the skill" }
+      },
+      "required": ["type", "request_id", "skill_name"]
+    },
+    "skill_response": {
+      "direction": "Python → Rust",
+      "description": "Expanded skill prompt ready to inject",
+      "fields": {
+        "type":           { "type": "string", "const": "skill_response" },
+        "request_id":     { "type": "string" },
+        "expanded_prompt": { "type": "string" },
+        "found":          { "type": "boolean" }
+      },
+      "required": ["type", "request_id", "found"]
+    },
+    "voice_start": {
+      "direction": "Rust → Python",
+      "description": "Begin voice capture and transcription",
+      "fields": {
+        "type":       { "type": "string", "const": "voice_start" },
+        "request_id": { "type": "string" },
+        "language":   { "type": "string", "default": "en" }
+      },
+      "required": ["type", "request_id"]
+    },
+    "voice_transcript": {
+      "direction": "Python → Rust",
+      "description": "Voice-to-text transcription result",
+      "fields": {
+        "type":       { "type": "string", "const": "voice_transcript" },
+        "request_id": { "type": "string" },
+        "text":       { "type": "string" },
+        "is_final":   { "type": "boolean" }
+      },
+      "required": ["type", "request_id", "text", "is_final"]
+    },
+    "output_style_request": {
+      "direction": "Rust → Python",
+      "description": "Load a named output style definition",
+      "fields": {
+        "type":       { "type": "string", "const": "output_style_request" },
+        "request_id": { "type": "string" },
+        "style_name": { "type": "string" }
+      },
+      "required": ["type", "request_id", "style_name"]
+    },
+    "output_style_response": {
+      "direction": "Python → Rust",
+      "description": "Output style definition",
+      "fields": {
+        "type":       { "type": "string", "const": "output_style_response" },
+        "request_id": { "type": "string" },
+        "definition": { "type": "object", "description": "Style rules and formatting instructions" },
+        "found":      { "type": "boolean" }
+      },
+      "required": ["type", "request_id", "found"]
+    },
+    "error": {
+      "direction": "Python → Rust",
+      "description": "Error response for any failed request",
+      "fields": {
+        "type":       { "type": "string", "const": "error" },
+        "request_id": { "type": "string" },
+        "code":       { "type": "string" },
+        "message":    { "type": "string" },
+        "retryable":  { "type": "boolean", "default": false }
+      },
+      "required": ["type", "request_id", "code", "message"]
+    }
+  }
+}
