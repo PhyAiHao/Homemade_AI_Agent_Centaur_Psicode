@@ -32,6 +32,7 @@ const MEMORY_PROMPT_MAX_BYTES: usize = 8_000;
 
 /// Tracks session memory extraction state across turns.
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 pub struct SessionMemoryState {
     /// Tokens at last extraction.
     pub tokens_at_last_extraction: u64,
@@ -94,6 +95,7 @@ impl SessionMemoryState {
 
     /// Check if the topic has shifted enough to warrant a re-prefetch of relevant memories.
     /// Uses keyword overlap: if < 30% of current keywords match the initial topic, topic has shifted.
+    #[allow(dead_code)]
     pub fn should_reprefetch(&self, current_user_message: &str) -> bool {
         if self.initial_topic_keywords.is_empty() || self.last_prefetch_query.is_empty() {
             return false;
@@ -110,6 +112,7 @@ impl SessionMemoryState {
     }
 
     /// Record that a prefetch happened for a given query.
+    #[allow(dead_code)]
     pub fn record_prefetch(&mut self, query: &str) {
         let keywords = extract_keywords(query);
         if self.initial_topic_keywords.is_empty() {
@@ -119,12 +122,14 @@ impl SessionMemoryState {
     }
 
     /// Record that compaction happened. Increments the depth counter.
+    #[allow(dead_code)]
     pub fn record_compaction(&mut self) {
         self.compaction_depth += 1;
     }
 }
 
 /// Extract lowercase keywords (>2 chars) from text for topic comparison.
+#[allow(dead_code)]
 fn extract_keywords(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_alphanumeric() && c != '_')
         .filter(|w| w.len() > 2)

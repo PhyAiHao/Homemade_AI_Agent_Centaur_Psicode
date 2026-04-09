@@ -27,8 +27,8 @@ const AUTO_BG_THRESHOLD: Duration = Duration::from_secs(120);
 /// Prevents unbounded agent spawning.
 const MAX_AGENT_DEPTH: u32 = 3;
 
-/// Thread-local recursion depth counter.
-/// Incremented when entering a sub-agent, decremented on exit.
+// Thread-local recursion depth counter.
+// Incremented when entering a sub-agent, decremented on exit.
 std::thread_local! {
     static AGENT_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
@@ -51,13 +51,6 @@ async fn run_in_process_agent(
     subagent_type: Option<&str>,
     output_tx: &mpsc::Sender<ToolOutput>,
 ) -> Result<(String, String)> {
-    use crate::ipc::IpcClient;
-    use crate::permissions::gate::PermissionGate;
-    use crate::permissions::mode::PermissionMode;
-    use crate::query::query_loop::{QueryLoopConfig, QueryEvent, run_query_loop};
-    use crate::query::message::ConversationMessage;
-    use crate::cost_tracker::CostTracker;
-
     // ── 6c: Recursion depth check ──────────────────────────────────
     let depth = current_agent_depth();
     if depth >= MAX_AGENT_DEPTH {

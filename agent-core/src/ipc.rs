@@ -376,6 +376,7 @@ impl IpcClient {
     }
 
     /// Send a heartbeat ping. Returns Ok(uptime_ms) or error if brain is unresponsive.
+    #[allow(dead_code)]
     pub async fn ping(&mut self) -> Result<u64> {
         let msg = IpcMessage::IpcPing(IpcPing {
             request_id: Self::new_request_id(),

@@ -201,6 +201,20 @@ impl ToolRegistry {
             Arc::new(web_search_tool::WebSearchTool),
             Arc::new(notebook_edit_tool::NotebookEditTool),
         ];
+
+        // Populate the global tool catalog for ToolSearch to query.
+        // This lets ToolSearch return real schemas for deferred tools.
+        let core_set: std::collections::HashSet<&str> = Self::CORE_TOOL_NAMES.iter().copied().collect();
+        let catalog: Vec<tool_search::ToolInfo> = tools.iter().map(|t| {
+            tool_search::ToolInfo {
+                name: t.name().to_string(),
+                description: t.description().to_string(),
+                input_schema: t.input_schema(),
+                is_core: core_set.contains(t.name()),
+            }
+        }).collect();
+        tool_search::set_full_catalog(catalog);
+
         ToolRegistry { tools }
     }
 

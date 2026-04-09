@@ -306,6 +306,24 @@ pub async fn run_query_loop(
     let mut memory_prefetch_result: Option<String> = None;
     let mut repeated_tool_counter: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
 
+    // ── Deferred tool loading ──────────────────────────────────────
+    // Start with core-only tools in the API request. filter_for_context()
+    // adds keyword-matched tools from the first user message. The FULL
+    // registry is kept for execution — so if the LLM calls a deferred
+    // tool (discovered via ToolSearch), it still works.
+    let first_user_msg = messages.iter()
+        .find(|m| m.role == super::message::Role::User)
+        .map(|m| m.text_content())
+        .unwrap_or_default();
+    let api_registry = registry.filter_for_context(&first_user_msg);
+    info!(
+        core = api_registry.len(),
+        total = registry.len(),
+        deferred = registry.len() - api_registry.len(),
+        "Tool loading: {} in API, {} deferred via ToolSearch",
+        api_registry.len(), registry.len() - api_registry.len(),
+    );
+
     // Auto-compact threshold — accounts for system prompt size so compaction
     // triggers before the prompt + messages exceed the context window.
     let autocompact_threshold = compact::auto_compact_threshold_with_prompt(
@@ -448,8 +466,8 @@ pub async fn run_query_loop(
         // ── Normalize messages (thinking blocks, empty content) ────────
         super::message::normalize_messages_for_api(messages);
 
-        // ── Build API request ───────────────────────────────────────────
-        let tools_json = registry.api_definitions();
+        // ── Build API request (only send filtered tools to save tokens) ──
+        let tools_json = api_registry.api_definitions();
         let mut messages_json: Vec<Value> = messages.iter().map(|m| {
             json!({
                 "role": m.role,
