@@ -1303,14 +1303,30 @@ section.light {
   color: rgba(255,255,255,0.3);
 }
 
+.doc-ingest-all-row {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.doc-ingest-all-btn {
+  width: 100%;
+  padding: 8px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(0,113,227,0.15);
+  color: var(--bright-blue);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.doc-ingest-all-btn:hover { background: rgba(0,113,227,0.25); }
+
 .doc-item .doc-actions {
   display: flex;
   gap: 2px;
   flex-shrink: 0;
-  opacity: 0;
 }
-
-.doc-item:hover .doc-actions { opacity: 1; }
 
 .doc-action-btn {
   padding: 2px 6px;
@@ -2197,6 +2213,11 @@ footer a:hover { text-decoration: underline; }
           <input type="file" id="docFileInput" style="display:none;" onchange="uploadDocument(this)" multiple accept=".md,.txt,.pdf,.json,.csv,.html,.yaml,.yml,.py,.rs,.ts,.js,.tex,.bib" />
         </div>
 
+        <!-- Ingest All button (always visible) -->
+        <div class="doc-ingest-all-row">
+          <button class="doc-ingest-all-btn" onclick="ingestAllDocuments()">Ingest All Documents into Wiki</button>
+        </div>
+
         <!-- Document list -->
         <div class="doc-list" id="docList"></div>
 
@@ -2488,12 +2509,22 @@ function handleWSMessage(msg) {
     case 'text_delta':
       accumulatedText += msg.delta;
       if (currentAgentEl) {
+        // Preserve tool blocks already rendered
+        const existingTools = currentAgentEl.querySelectorAll('.tool-call-block');
+        const toolNodes = Array.from(existingTools).map(b => b.cloneNode(true));
         currentAgentEl.innerHTML = renderMarkdown(accumulatedText);
+        toolNodes.forEach(b => currentAgentEl.appendChild(b));
         scrollToBottom();
       }
       break;
     case 'tool_use':
       appendToolCall(msg.name, msg.input, msg.tool_call_id);
+      break;
+    case 'tool_executing':
+      updateToolStatus(msg.tool_call_id, 'running');
+      break;
+    case 'tool_result':
+      updateToolResult(msg.tool_call_id, msg.name, msg.output);
       break;
     case 'message_done':
       finalizeMessage(msg.usage);
@@ -2508,6 +2539,24 @@ function handleWSMessage(msg) {
       updateSendBtn();
       break;
   }
+}
+
+function updateToolStatus(toolCallId, status) {
+  const el = document.querySelector(`[data-tool-id="${toolCallId}"] .tool-toggle`);
+  if (el) el.textContent = status === 'running' ? 'running...' : '';
+}
+
+function updateToolResult(toolCallId, name, output) {
+  const block = document.querySelector(`[data-tool-id="${toolCallId}"]`);
+  if (!block) return;
+  const body = block.querySelector('.tool-call-body');
+  if (body) {
+    body.textContent = output || '(no output)';
+    body.classList.add('expanded');
+  }
+  const toggle = block.querySelector('.tool-toggle');
+  if (toggle) toggle.textContent = 'done';
+  scrollToBottom();
 }
 
 // ── Chat ────────────────────────────────────────────────────────
@@ -2578,17 +2627,23 @@ function appendToolCall(name, input, id) {
 
   const block = document.createElement('div');
   block.className = 'tool-call-block';
+  block.setAttribute('data-tool-id', id);
   const header = document.createElement('div');
   header.className = 'tool-call-header';
-  header.innerHTML = `<span class="tool-name">${escapeHtml(name)}</span><span class="tool-toggle">&#9660;</span>`;
+  header.innerHTML = `<span class="tool-name">${escapeHtml(name)}</span><span class="tool-toggle">pending...</span>`;
+  const inputBody = document.createElement('div');
+  inputBody.className = 'tool-call-input';
+  inputBody.textContent = JSON.stringify(input, null, 2);
+  inputBody.style.cssText = 'font-size:11px; color:rgba(255,255,255,0.3); padding:0 12px 4px; font-family:ui-monospace,monospace; white-space:pre-wrap; word-break:break-all;';
   const body = document.createElement('div');
   body.className = 'tool-call-body';
-  body.textContent = JSON.stringify(input, null, 2);
+  body.textContent = '(waiting for execution...)';
   header.onclick = () => {
     body.classList.toggle('expanded');
-    header.querySelector('.tool-toggle').innerHTML = body.classList.contains('expanded') ? '&#9650;' : '&#9660;';
+    inputBody.style.display = inputBody.style.display === 'none' ? 'block' : 'none';
   };
   block.appendChild(header);
+  block.appendChild(inputBody);
   block.appendChild(body);
   currentAgentEl.appendChild(block);
   scrollToBottom();
@@ -3504,6 +3559,27 @@ function ingestDocument(filePath, fileName) {
   const input = document.getElementById('appInput');
   input.value = `Ingest the document at "${filePath}" into the wiki. Title: "${fileName}"`;
   sendMessage();
+}
+
+async function ingestAllDocuments() {
+  try {
+    const res = await fetch(API_BASE + '/api/documents');
+    const data = await res.json();
+    const ingestable = (data.files || []).filter(f => f.can_ingest);
+    if (ingestable.length === 0) {
+      alert('No ingestable documents found.\nAdd .md, .txt, or .html files to the documents/ folder first.');
+      return;
+    }
+    if (!confirm(`Ingest ${ingestable.length} document(s) into the wiki?`)) return;
+
+    for (const file of ingestable) {
+      const input = document.getElementById('appInput');
+      input.value = `Ingest the document at "${file.path}" into the wiki. Title: "${file.name}"`;
+      sendMessage();
+      // Small delay between ingests to avoid overwhelming
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  } catch(e) { alert('Error: ' + e); }
 }
 
 async function deleteDocument(filePath) {

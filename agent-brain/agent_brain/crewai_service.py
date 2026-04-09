@@ -97,14 +97,24 @@ class CrewAIService:
                 payload={"result": result},
             )
 
-        except ImportError:
+        except ImportError as ie:
+            # Only catch if crewai itself is not installed
+            if "crewai" in str(ie).lower() or "No module named" in str(ie):
+                return MemoryResponse(
+                    request_id=request.request_id,
+                    ok=False,
+                    error=(
+                        "CrewAI is not installed. "
+                        "Install with: pip install crewai"
+                    ),
+                    payload={},
+                )
+            # Other ImportErrors (wrong crewai version, missing sub-dep) — show real error
+            logger.exception("CrewAI import error")
             return MemoryResponse(
                 request_id=request.request_id,
                 ok=False,
-                error=(
-                    "CrewAI is not installed. "
-                    "Install with: /opt/homebrew/opt/python@3.10/libexec/bin/python3 -m pip install crewai"
-                ),
+                error=f"CrewAI import error: {ie}",
                 payload={},
             )
         except Exception as error:
@@ -161,17 +171,60 @@ class CrewAIService:
 
     async def _run_crew(self, config: dict[str, Any], inputs: dict[str, Any]) -> str:
         """Parse a crew config dict and execute the crew."""
-        from crewai import Agent, Crew, Process, Task
+        from crewai import Agent, Crew, Process, Task, LLM
+
+        # ── Build LLM instances ────────────────────────────────────────
+        # CrewAI v1.14+ requires explicit LLM objects for non-OpenAI models.
+        import os
+        llm_cache: dict[str, Any] = {}
+
+        def _get_llm(model_str: str) -> Any:
+            if model_str in llm_cache:
+                return llm_cache[model_str]
+            model_lower = model_str.lower()
+
+            try:
+                if model_lower.startswith("claude"):
+                    # Anthropic — requires ANTHROPIC_API_KEY
+                    llm = LLM(
+                        model=f"anthropic/{model_str}",
+                        api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+                    )
+                elif model_lower.startswith(("gpt", "o1", "o3", "o4")):
+                    # OpenAI
+                    llm = LLM(
+                        model=f"openai/{model_str}",
+                        api_key=os.environ.get("OPENAI_API_KEY", ""),
+                    )
+                elif model_lower.startswith("gemini"):
+                    # Google
+                    llm = LLM(
+                        model=f"gemini/{model_str}",
+                        api_key=os.environ.get("GEMINI_API_KEY", ""),
+                    )
+                else:
+                    # Ollama (local) — no API key needed
+                    llm = LLM(
+                        model=f"ollama/{model_str}",
+                        base_url="http://localhost:11434",
+                    )
+            except Exception:
+                # Fallback: pass raw string and hope CrewAI handles it
+                llm = model_str
+
+            llm_cache[model_str] = llm
+            return llm
 
         # ── Parse agents ────────────────────────────────────────────────
         agents: dict[str, Agent] = {}
         for agent_cfg in config.get("agents", []):
             name = agent_cfg.get("name", agent_cfg.get("role", "agent"))
+            model_str = agent_cfg.get("llm", "gemma4:31b")
             agent = Agent(
                 role=agent_cfg["role"],
                 goal=agent_cfg["goal"],
                 backstory=agent_cfg.get("backstory", ""),
-                llm=agent_cfg.get("llm", "claude-sonnet-4-6"),
+                llm=_get_llm(model_str),
                 verbose=agent_cfg.get("verbose", False),
                 allow_delegation=agent_cfg.get("allow_delegation", False),
             )

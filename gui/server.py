@@ -320,13 +320,18 @@ class WebServer:
         env_path = self.project_dir / ".env"
         self.settings = SettingsManager(env_path)
 
-        # Backend
-        self.backend = self._build_backend()
+        # Build the full IpcServer as a service container
+        # This gives us ALL agent services: memory, wiki, dream, skills, crewai, compact
+        self._init_services()
 
         # Sessions
         self.sessions: dict[str, ChatSession] = {}
 
-    def _build_backend(self) -> Any:
+        # Turn counter for dream triggers
+        self._turn_count = 0
+
+    def _init_services(self) -> None:
+        """Initialize the full IpcServer as service container — gives us ALL features."""
         from agent_brain.api.client import (
             AnthropicBackend,
             BackendRouter,
@@ -334,15 +339,30 @@ class WebServer:
             OllamaBackend,
             OpenAIBackend,
         )
+        from agent_brain.ipc_server import IpcServer
+
         ak = os.environ.get("ANTHROPIC_API_KEY")
         ok_ = os.environ.get("OPENAI_API_KEY")
         gk = os.environ.get("GEMINI_API_KEY")
-        return BackendRouter(
+        backend = BackendRouter(
             anthropic=AnthropicBackend(api_key=ak) if ak else None,
             openai=OpenAIBackend(api_key=ok_) if ok_ else None,
             gemini=GeminiBackend(api_key=gk) if gk else None,
             ollama=OllamaBackend(),
         )
+
+        # Create IpcServer but DON'T start the socket listener.
+        # We just use it as a container for all services.
+        # CRITICAL: memory_root_dir must point to the REAL persistent location,
+        # not /tmp/ (which is what socket_path.parent would default to).
+        self.ipc = IpcServer(
+            socket_path="/tmp/gui-ipc-unused.sock",
+            backend=backend,
+            memory_root_dir=str(Path.home() / ".agent" / "memory"),
+            skill_root_dir=str(self.project_dir),
+        )
+        # Shorthand for the most-used service
+        self.backend = self.ipc.backend
 
     # ── HTTP Server ─────────────────────────────────────────────────
 
@@ -389,7 +409,7 @@ class WebServer:
             elif method == "POST" and path == "/api/settings":
                 data = json.loads(body) if body else {}
                 self.settings.update(data)
-                self.backend = self._build_backend()
+                self._init_services()  # Rebuild all services with new keys
                 await self._json_response(writer, {"ok": True, **self.settings.get_status()})
             elif method == "GET" and path == "/api/models":
                 await self._json_response(writer, _build_model_catalog())
@@ -548,7 +568,557 @@ class WebServer:
         else:
             await websocket.send(json.dumps({"type": "error", "message": f"Unknown type: {msg_type}"}))
 
+    # ── System prompt construction ─────────────────────────────────
+
+    def _build_system_prompt(self, user_topic: str = "") -> str:
+        """Build a rich system prompt with context, CLAUDE.md, memory, and environment."""
+        parts: list[str] = []
+
+        # Core identity
+        parts.append(
+            "You are Centaur Psicode, a powerful AI coding assistant with persistent memory, "
+            "a wiki knowledge base, and tool execution capabilities. "
+            "You can read/write files, run shell commands, search the web, manage memory, "
+            "ingest documents into a wiki, and orchestrate multi-agent crews. "
+            "Be concise, precise, and helpful. Use tools to accomplish tasks — don't just describe what to do, actually do it."
+        )
+
+        # Environment context
+        import platform
+        cwd = str(self.project_dir)
+        parts.append(f"\n## Environment\n- Working directory: {cwd}\n- Platform: {platform.system()} {platform.machine()}\n- Shell: {os.environ.get('SHELL', '/bin/zsh')}\n- Date: {time.strftime('%Y-%m-%d')}")
+
+        # Git context
+        try:
+            import subprocess
+            branch = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True, cwd=cwd, timeout=3).stdout.strip()
+            status = subprocess.run(["git", "status", "--short"], capture_output=True, text=True, cwd=cwd, timeout=3).stdout.strip()
+            if branch:
+                git_info = f"\n## Git\n- Branch: {branch}"
+                if status:
+                    git_info += f"\n- Status:\n```\n{status[:500]}\n```"
+                parts.append(git_info)
+        except Exception:
+            pass
+
+        # CLAUDE.md files
+        for name in ["CLAUDE.md", ".claude/CLAUDE.md"]:
+            p = self.project_dir / name
+            if p.is_file():
+                content = p.read_text(encoding="utf-8", errors="replace")[:3000]
+                parts.append(f"\n## Project Instructions (from {name})\n{content}")
+                break
+
+        # WIKI_SCHEMA.md
+        for name in ["WIKI_SCHEMA.md", ".claude/WIKI_SCHEMA.md"]:
+            p = self.project_dir / name
+            if p.is_file():
+                content = p.read_text(encoding="utf-8", errors="replace")[:2000]
+                parts.append(f"\n## Wiki Schema\n{content}")
+                break
+
+        # Memory context (L0 + L1 + L2) via IpcServer's memory service
+        try:
+            from agent_brain.memory.layers import MemoryStack
+            store = self.ipc.memory_service.store
+            stack = MemoryStack(store=store, vector=store.vector_store)
+            wake = stack.wake_up(topic=user_topic[:200] if user_topic else None)
+            if wake:
+                parts.append(f"\n{wake}")
+        except Exception:
+            pass
+
+        return "\n".join(parts)
+
+    async def _extract_memories_from_turn(self, user_msg: str, assistant_msg: str) -> None:
+        """M1: Extract durable memories from the conversation turn (fire-and-forget)."""
+        try:
+            from agent_brain.memory.extract import MemoryExtractor
+            store = self.ipc.memory_service.store
+            extractor = MemoryExtractor()
+            messages = [
+                {"role": "user", "content": user_msg},
+                {"role": "assistant", "content": assistant_msg},
+            ]
+            result = extractor.extract(messages, store=store)
+            if hasattr(result, "candidates") and result.candidates:
+                for c in result.candidates:
+                    if c.confidence > 0.6:
+                        store.save_memory(
+                            title=c.title,
+                            body=c.body,
+                            memory_type=c.memory_type,
+                            description=c.description or c.body[:80],
+                        )
+                logger.info("M1: extracted %d memory candidates", len(result.candidates))
+        except Exception as e:
+            logger.debug("Memory extraction skipped: %s", e)
+
+    async def _maybe_dream(self) -> None:
+        """SM4: Trigger dream consolidation after enough turns."""
+        if self._turn_count > 0 and self._turn_count % 20 == 0:
+            try:
+                from agent_brain.ipc_types import MemoryRequest
+                req = MemoryRequest(
+                    request_id=str(uuid.uuid4()),
+                    action="dream_consolidate",
+                    payload={
+                        "memory_dir": str(self.ipc.memory_service.store.root_dir),
+                        "transcript_dir": str(Path.home() / ".agent" / "transcripts"),
+                    },
+                )
+                resp = await self.ipc.dream_service.handle(req)
+                if resp.ok:
+                    logger.info("Dream consolidation completed: %s", resp.payload.get("summary", ""))
+            except Exception as e:
+                logger.debug("Dream consolidation skipped: %s", e)
+
+    # ── Tool definitions sent to the LLM ──────────────────────────
+
+    TOOL_DEFINITIONS = [
+        # ── Core file & shell tools ────────────────────────────────
+        {"name": "Bash", "description": "Execute a shell command and return its output. Use for: running scripts, git, ls, pwd, installing packages, etc.",
+         "input_schema": {"type": "object", "properties": {"command": {"type": "string", "description": "The command to execute"}}, "required": ["command"]}},
+        {"name": "FileRead", "description": "Read a file from disk. Returns content with line numbers. Supports text files and PDFs.",
+         "input_schema": {"type": "object", "properties": {"file_path": {"type": "string", "description": "Absolute path to the file"}, "offset": {"type": "integer", "description": "Line to start from (0-based)"}, "limit": {"type": "integer", "description": "Max lines to read"}}, "required": ["file_path"]}},
+        {"name": "FileWrite", "description": "Create or overwrite a file with the given content.",
+         "input_schema": {"type": "object", "properties": {"file_path": {"type": "string", "description": "Absolute path"}, "content": {"type": "string", "description": "File content to write"}}, "required": ["file_path", "content"]}},
+        {"name": "FileEdit", "description": "Replace a specific string in a file. The old_string must match exactly and be unique.",
+         "input_schema": {"type": "object", "properties": {"file_path": {"type": "string", "description": "Absolute path"}, "old_string": {"type": "string", "description": "Exact text to find"}, "new_string": {"type": "string", "description": "Replacement text"}}, "required": ["file_path", "old_string", "new_string"]}},
+        {"name": "Glob", "description": "Find files matching a glob pattern (e.g., '**/*.py'). Returns file paths.",
+         "input_schema": {"type": "object", "properties": {"pattern": {"type": "string", "description": "Glob pattern"}, "path": {"type": "string", "description": "Directory to search in"}}, "required": ["pattern"]}},
+        {"name": "Grep", "description": "Search file contents for a regex pattern. Returns matching lines with file paths and line numbers.",
+         "input_schema": {"type": "object", "properties": {"pattern": {"type": "string", "description": "Regex pattern"}, "path": {"type": "string", "description": "File or directory to search"}, "glob": {"type": "string", "description": "Filter files by glob"}}, "required": ["pattern"]}},
+        # ── Memory & Wiki tools ────────────────────────────────────
+        {"name": "MemoryRecall", "description": "Search the persistent memory/wiki for relevant information. Use when the user asks about past conversations, stored knowledge, or project context.",
+         "input_schema": {"type": "object", "properties": {"query": {"type": "string", "description": "What to search for"}, "limit": {"type": "integer", "description": "Max results (default 5)"}}, "required": ["query"]}},
+        {"name": "MemorySave", "description": "Save important information to persistent memory for future sessions. Use for: user preferences, decisions, facts, project context.",
+         "input_schema": {"type": "object", "properties": {"title": {"type": "string"}, "body": {"type": "string"}, "memory_type": {"type": "string", "enum": ["user", "feedback", "project", "reference"]}, "tags": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "body", "memory_type"]}},
+        {"name": "WikiIngest", "description": "Ingest a document into the wiki knowledge base. Extracts entities, concepts, summaries, and cross-references.",
+         "input_schema": {"type": "object", "properties": {"content": {"type": "string", "description": "The document text to ingest"}, "title": {"type": "string", "description": "Title for the source"}, "source_type": {"type": "string", "enum": ["file", "web", "manual"]}, "tags": {"type": "array", "items": {"type": "string"}}}, "required": ["content", "title"]}},
+        {"name": "WikiQuery", "description": "Ask a question against the wiki knowledge base. Searches for relevant pages and synthesizes an answer.",
+         "input_schema": {"type": "object", "properties": {"question": {"type": "string"}, "save_as_page": {"type": "boolean", "description": "Save the answer as a wiki page"}}, "required": ["question"]}},
+        {"name": "WikiLint", "description": "Run a health check on the wiki: find orphan pages, broken references, stale content, missing pages.",
+         "input_schema": {"type": "object", "properties": {}, "required": []}},
+        # ── Web tools ──────────────────────────────────────────────
+        {"name": "WebFetch", "description": "Fetch a web page URL and return its text content. Use for reading articles, documentation, APIs.",
+         "input_schema": {"type": "object", "properties": {"url": {"type": "string", "description": "URL to fetch"}}, "required": ["url"]}},
+        {"name": "WebSearch", "description": "Search the web and return results. Use when you need current information not in your training data.",
+         "input_schema": {"type": "object", "properties": {"query": {"type": "string", "description": "Search query"}}, "required": ["query"]}},
+        # ── CrewAI ─────────────────────────────────────────────────
+        {"name": "CrewAI", "description": "Run a multi-agent CrewAI crew. Use a saved template by name, or provide inline crew_config.",
+         "input_schema": {"type": "object", "properties": {"crew_name": {"type": "string", "description": "Name of saved crew template"}, "crew_config": {"type": "object", "description": "Inline crew config (agents + tasks)"}, "inputs": {"type": "object", "description": "Input variables for the crew"}}}},
+        # ── Knowledge Graph ────────────────────────────────────────
+        {"name": "KGQuery", "description": "Query the knowledge graph for entity relationships. Supports temporal filtering with as_of date.",
+         "input_schema": {"type": "object", "properties": {"entity": {"type": "string", "description": "Entity name to query"}, "as_of": {"type": "string", "description": "Date filter (YYYY-MM-DD)"}, "direction": {"type": "string", "enum": ["in", "out", "both"]}}, "required": ["entity"]}},
+        {"name": "KGAdd", "description": "Add a fact triple to the knowledge graph (subject, predicate, object).",
+         "input_schema": {"type": "object", "properties": {"subject": {"type": "string"}, "predicate": {"type": "string"}, "object": {"type": "string"}, "valid_from": {"type": "string"}, "confidence": {"type": "number"}}, "required": ["subject", "predicate", "object"]}},
+        {"name": "KGTimeline", "description": "Get chronological timeline of facts about an entity.",
+         "input_schema": {"type": "object", "properties": {"entity": {"type": "string", "description": "Entity name (optional — omit for all)"}}}},
+        # ── Skills ─────────────────────────────────────────────────
+        {"name": "RunSkill", "description": "Execute a bundled skill by name: commit, review, debug, wiki-init, wiki-lint, remember, simplify, ultraplan, etc.",
+         "input_schema": {"type": "object", "properties": {"skill_name": {"type": "string", "description": "Skill name (e.g., commit, review, debug, wiki-init)"}, "arguments": {"type": "object", "description": "Arguments for the skill"}}, "required": ["skill_name"]}},
+    ]
+
+    # ── Tool execution (Python-side) ───────────────────────────────
+
+    async def _execute_tool(self, name: str, input_data: dict[str, Any]) -> str:
+        """Execute a tool and return the result as text."""
+        try:
+            if name == "Bash":
+                return await self._tool_bash(input_data)
+            elif name == "FileRead":
+                return self._tool_file_read(input_data)
+            elif name == "FileWrite":
+                return self._tool_file_write(input_data)
+            elif name == "FileEdit":
+                return self._tool_file_edit(input_data)
+            elif name == "Glob":
+                return self._tool_glob(input_data)
+            elif name == "Grep":
+                return self._tool_grep(input_data)
+            elif name == "MemoryRecall":
+                return self._tool_memory_recall(input_data)
+            elif name == "MemorySave":
+                return self._tool_memory_save(input_data)
+            elif name == "WikiIngest":
+                return await self._tool_wiki_ingest(input_data)
+            elif name == "WikiQuery":
+                return await self._tool_wiki_query(input_data)
+            elif name == "WikiLint":
+                return await self._tool_wiki_lint(input_data)
+            elif name == "WebFetch":
+                return await self._tool_web_fetch(input_data)
+            elif name == "WebSearch":
+                return await self._tool_web_search(input_data)
+            elif name == "CrewAI":
+                return await self._tool_crewai(input_data)
+            elif name == "KGQuery":
+                return self._tool_kg_query(input_data)
+            elif name == "KGAdd":
+                return self._tool_kg_add(input_data)
+            elif name == "KGTimeline":
+                return self._tool_kg_timeline(input_data)
+            elif name == "RunSkill":
+                return await self._tool_run_skill(input_data)
+            else:
+                return f"Tool '{name}' is not available in the GUI."
+        except Exception as e:
+            return f"Tool error: {e}"
+
+    async def _tool_bash(self, inp: dict[str, Any]) -> str:
+        cmd = inp.get("command", "")
+        if not cmd:
+            return "Error: no command provided"
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=str(self.project_dir),
+                env={**os.environ, "TERM": "dumb", "NO_COLOR": "1"},
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            output = stdout.decode("utf-8", errors="replace")
+            if len(output) > 20000:
+                output = output[:20000] + "\n... [truncated]"
+            if proc.returncode != 0:
+                output += f"\n[exit code: {proc.returncode}]"
+            return output or "(no output)"
+        except asyncio.TimeoutError:
+            return "[command timed out after 30s]"
+
+    def _tool_file_read(self, inp: dict[str, Any]) -> str:
+        file_path = inp.get("file_path", "")
+        p = Path(file_path)
+        if not p.is_file():
+            return f"Error: file not found: {file_path}"
+        try:
+            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+            offset = int(inp.get("offset", 0))
+            limit = int(inp.get("limit", 2000))
+            selected = lines[offset:offset + limit]
+            numbered = [f"{i + offset + 1}\t{line}" for i, line in enumerate(selected)]
+            return "\n".join(numbered) or "(empty file)"
+        except Exception as e:
+            return f"Error reading file: {e}"
+
+    def _tool_file_write(self, inp: dict[str, Any]) -> str:
+        file_path = inp.get("file_path", "")
+        content = inp.get("content", "")
+        p = Path(file_path)
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+            return f"File written: {file_path} ({len(content)} bytes)"
+        except Exception as e:
+            return f"Error writing file: {e}"
+
+    def _tool_file_edit(self, inp: dict[str, Any]) -> str:
+        file_path = inp.get("file_path", "")
+        old_string = inp.get("old_string", "")
+        new_string = inp.get("new_string", "")
+        p = Path(file_path)
+        if not p.is_file():
+            return f"Error: file not found: {file_path}"
+        try:
+            text = p.read_text(encoding="utf-8")
+            if old_string not in text:
+                return f"Error: old_string not found in {file_path}"
+            count = text.count(old_string)
+            if count > 1:
+                return f"Error: old_string matches {count} times (must be unique)"
+            new_text = text.replace(old_string, new_string, 1)
+            p.write_text(new_text, encoding="utf-8")
+            return f"File edited: {file_path}"
+        except Exception as e:
+            return f"Error editing file: {e}"
+
+    def _tool_glob(self, inp: dict[str, Any]) -> str:
+        import glob as globmod
+        pattern = inp.get("pattern", "")
+        search_path = inp.get("path", str(self.project_dir))
+        full_pattern = str(Path(search_path) / pattern)
+        try:
+            matches = sorted(globmod.glob(full_pattern, recursive=True))[:100]
+            if not matches:
+                return f"No files matched: {pattern}"
+            return "\n".join(matches)
+        except Exception as e:
+            return f"Glob error: {e}"
+
+    def _tool_grep(self, inp: dict[str, Any]) -> str:
+        import re as remod
+        pattern = inp.get("pattern", "")
+        search_path = inp.get("path", str(self.project_dir))
+        file_glob = inp.get("glob", "")
+        try:
+            regex = remod.compile(pattern, remod.IGNORECASE)
+        except remod.error as e:
+            return f"Invalid regex: {e}"
+        results = []
+        search_p = Path(search_path)
+        if search_p.is_file():
+            files = [search_p]
+        else:
+            glob_pat = file_glob or "**/*"
+            files = sorted(search_p.glob(glob_pat))[:500]
+        for fp in files:
+            if not fp.is_file() or fp.suffix.lower() not in self.TEXT_EXTS:
+                continue
+            try:
+                for i, line in enumerate(fp.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                    if regex.search(line):
+                        results.append(f"{fp}:{i}:{line.rstrip()}")
+                        if len(results) >= 50:
+                            break
+            except Exception:
+                continue
+            if len(results) >= 50:
+                break
+        return "\n".join(results) if results else f"No matches for: {pattern}"
+
+    # ── Memory & Wiki tools ────────────────────────────────────────
+
+    def _tool_memory_recall(self, inp: dict[str, Any]) -> str:
+        """L3 deep search across memory + wiki via MemoryService."""
+        query = inp.get("query", "")
+        limit = int(inp.get("limit", 5))
+        try:
+            store = self.ipc.memory_service.store
+            result = store.recall(query, limit=limit)
+            if not result.memories:
+                return f"No memories found for: {query}"
+            parts = []
+            for m in result.memories:
+                parts.append(
+                    f"[{m.metadata.memory_type}] {m.metadata.name}\n"
+                    f"  {m.metadata.description}\n"
+                    f"  Tags: {', '.join(m.metadata.tags) if m.metadata.tags else 'none'}\n"
+                    f"  {m.body[:500]}"
+                )
+            return "\n---\n".join(parts)
+        except Exception as e:
+            return f"Memory recall error: {e}"
+
+    def _tool_memory_save(self, inp: dict[str, Any]) -> str:
+        """Save to persistent memory via MemoryService."""
+        try:
+            store = self.ipc.memory_service.store
+            record = store.save_memory(
+                title=inp.get("title", "Untitled"),
+                body=inp.get("body", ""),
+                memory_type=inp.get("memory_type", "project"),
+                tags=inp.get("tags"),
+                description=inp.get("body", "")[:80],
+            )
+            return f"Saved memory: {record.metadata.slug} (tier: {record.metadata.tier})"
+        except Exception as e:
+            return f"Memory save error: {e}"
+
+    async def _tool_wiki_ingest(self, inp: dict[str, Any]) -> str:
+        """Ingest content via WikiService (from IpcServer)."""
+        try:
+            from agent_brain.ipc_types import MemoryRequest
+            req = MemoryRequest(
+                request_id=str(uuid.uuid4()),
+                action="wiki_ingest",
+                payload={
+                    "content": inp.get("content", ""),
+                    "title": inp.get("title", "Untitled"),
+                    "source_type": inp.get("source_type", "manual"),
+                    "tags": inp.get("tags", []),
+                },
+            )
+            resp = await self.ipc.wiki_service.ingest(req)
+            if resp.ok:
+                return f"Ingested: {resp.payload.get('pages_created', 0)} pages created, {resp.payload.get('pages_updated', 0)} updated."
+            return f"Ingest failed: {resp.error}"
+        except Exception as e:
+            return f"WikiIngest error: {e}"
+
+    async def _tool_wiki_query(self, inp: dict[str, Any]) -> str:
+        """Query wiki via WikiService (from IpcServer)."""
+        try:
+            from agent_brain.ipc_types import MemoryRequest
+            req = MemoryRequest(
+                request_id=str(uuid.uuid4()),
+                action="wiki_query",
+                payload={
+                    "question": inp.get("question", ""),
+                    "save_as_page": inp.get("save_as_page", False),
+                },
+            )
+            resp = await self.ipc.wiki_service.query(req)
+            if resp.ok:
+                return resp.payload.get("answer", "(no answer)")
+            return f"WikiQuery failed: {resp.error}"
+        except Exception as e:
+            return f"WikiQuery error: {e}"
+
+    async def _tool_wiki_lint(self, inp: dict[str, Any]) -> str:
+        """Wiki health check via WikiService (from IpcServer)."""
+        try:
+            from agent_brain.ipc_types import MemoryRequest
+            req = MemoryRequest(
+                request_id=str(uuid.uuid4()),
+                action="wiki_lint",
+                payload={},
+            )
+            resp = await self.ipc.wiki_service.lint(req)
+            if resp.ok:
+                return resp.payload.get("report", "(no report)")
+            return f"WikiLint failed: {resp.error}"
+        except Exception as e:
+            return f"WikiLint error: {e}"
+
+    # ── Web tools ──────────────────────────────────────────────────
+
+    async def _tool_web_fetch(self, inp: dict[str, Any]) -> str:
+        """Fetch a URL and return text content."""
+        url = inp.get("url", "")
+        if not url:
+            return "Error: no URL provided"
+        try:
+            import httpx
+            async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
+                resp = await client.get(url, headers={"User-Agent": "CentaurPsicode/1.0"})
+                resp.raise_for_status()
+                text = resp.text
+                # Strip HTML tags for readability
+                import re
+                text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.S)
+                text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.S)
+                text = re.sub(r'<[^>]+>', ' ', text)
+                text = re.sub(r'\s+', ' ', text).strip()
+                if len(text) > 15000:
+                    text = text[:15000] + "\n... [truncated]"
+                return text or "(empty page)"
+        except Exception as e:
+            return f"WebFetch error: {e}"
+
+    async def _tool_web_search(self, inp: dict[str, Any]) -> str:
+        """Search the web (via DuckDuckGo HTML — no API key needed)."""
+        query = inp.get("query", "")
+        if not query:
+            return "Error: no query provided"
+        try:
+            import httpx
+            async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
+                resp = await client.get(
+                    "https://html.duckduckgo.com/html/",
+                    params={"q": query},
+                    headers={"User-Agent": "CentaurPsicode/1.0"},
+                )
+                import re
+                results = re.findall(
+                    r'<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>(.*?)</a>.*?'
+                    r'<a class="result__snippet"[^>]*>(.*?)</a>',
+                    resp.text, re.S,
+                )
+                if not results:
+                    return f"No search results for: {query}"
+                lines = []
+                for url, title, snippet in results[:8]:
+                    title = re.sub(r'<[^>]+>', '', title).strip()
+                    snippet = re.sub(r'<[^>]+>', '', snippet).strip()
+                    lines.append(f"- [{title}]({url})\n  {snippet}")
+                return "\n\n".join(lines)
+        except Exception as e:
+            return f"WebSearch error: {e}"
+
+    # ── CrewAI tool ────────────────────────────────────────────────
+
+    async def _tool_crewai(self, inp: dict[str, Any]) -> str:
+        """Run a CrewAI crew via IpcServer's CrewAIService."""
+        try:
+            from agent_brain.ipc_types import MemoryRequest
+            req = MemoryRequest(
+                request_id=str(uuid.uuid4()),
+                action="crewai_run",
+                payload={
+                    "crew_name": inp.get("crew_name", ""),
+                    "crew_config": inp.get("crew_config", {}),
+                    "inputs": inp.get("inputs", {}),
+                },
+            )
+            resp = await self.ipc.crewai_service.handle(req)
+            if resp.ok:
+                return resp.payload.get("result", "(no result)")
+            return f"CrewAI error: {resp.error}"
+        except Exception as e:
+            return f"CrewAI error: {e}"
+
+    # ── Knowledge Graph tools ────────────────────────────────────
+
+    def _tool_kg_query(self, inp: dict[str, Any]) -> str:
+        try:
+            from agent_brain.ipc_types import MemoryRequest
+            req = MemoryRequest(request_id=str(uuid.uuid4()), action="kg_query", payload=inp)
+            resp = self.ipc._handle_kg(req)
+            if resp.ok:
+                rels = resp.payload.get("relationships", [])
+                if not rels:
+                    return f"No relationships found for: {inp.get('entity', '')}"
+                lines = []
+                for r in rels[:20]:
+                    lines.append(f"{r['subject']} --{r['predicate']}--> {r['object']} (from: {r.get('valid_from', '?')}, current: {r.get('current', '?')})")
+                return "\n".join(lines)
+            return f"KG query error: {resp.error}"
+        except Exception as e:
+            return f"KGQuery error: {e}"
+
+    def _tool_kg_add(self, inp: dict[str, Any]) -> str:
+        try:
+            from agent_brain.ipc_types import MemoryRequest
+            req = MemoryRequest(request_id=str(uuid.uuid4()), action="kg_add", payload=inp)
+            resp = self.ipc._handle_kg(req)
+            if resp.ok:
+                return f"Added triple: {inp.get('subject', '')} --{inp.get('predicate', '')}--> {inp.get('object', '')} (id: {resp.payload.get('triple_id', '')})"
+            return f"KG add error: {resp.error}"
+        except Exception as e:
+            return f"KGAdd error: {e}"
+
+    def _tool_kg_timeline(self, inp: dict[str, Any]) -> str:
+        try:
+            from agent_brain.ipc_types import MemoryRequest
+            req = MemoryRequest(request_id=str(uuid.uuid4()), action="kg_timeline", payload=inp)
+            resp = self.ipc._handle_kg(req)
+            if resp.ok:
+                tl = resp.payload.get("timeline", [])
+                if not tl:
+                    return "No timeline entries found."
+                lines = []
+                for entry in tl[:30]:
+                    lines.append(f"[{entry.get('valid_from', '?')}] {entry['subject']} {entry['predicate']} {entry['object']}")
+                return "\n".join(lines)
+            return f"KG timeline error: {resp.error}"
+        except Exception as e:
+            return f"KGTimeline error: {e}"
+
+    # ── Skill execution ────────────────────────────────────────────
+
+    async def _tool_run_skill(self, inp: dict[str, Any]) -> str:
+        """Execute a bundled skill via SkillService."""
+        try:
+            from agent_brain.ipc_types import SkillRequest
+            skill_name = inp.get("skill_name", "")
+            if not skill_name:
+                return "Error: skill_name is required"
+            req = SkillRequest(
+                request_id=str(uuid.uuid4()),
+                skill_name=skill_name,
+                arguments=inp.get("arguments", {}),
+            )
+            resp = await self.ipc.skill_handler(req)
+            return resp.content if hasattr(resp, "content") else str(resp)
+        except Exception as e:
+            return f"Skill error: {e}"
+
+    # ── Agentic Chat Loop (LLM → tool → result → LLM → ...) ──────
+
     async def _handle_chat(self, websocket: Any, msg: dict[str, Any]) -> None:
+        """Full agentic loop: call LLM, execute tools, feed results back, repeat."""
         from agent_brain.api.client import StreamRequest
 
         content = str(msg.get("content", "")).strip()
@@ -566,8 +1136,6 @@ class WebServer:
             await websocket.send(json.dumps({"type": "session_created", "session_id": sid}))
 
         session = self.sessions[sid]
-
-        # Update model/provider if specified
         if msg.get("model"):
             session.model = msg["model"]
         if msg.get("provider"):
@@ -575,98 +1143,134 @@ class WebServer:
 
         session.add_user_message(content)
 
-        # Build system prompt
-        system_prompt = (
-            "You are Centaur Psicode, a powerful AI coding assistant. "
-            "You help users write, debug, and understand code. "
-            "Be concise, precise, and helpful."
-        )
+        # Build system prompt with full context
+        system_prompt = self._build_system_prompt(content)
 
-        # Try to load memory context
-        try:
-            from agent_brain.memory.layers import MemoryStack
-            from agent_brain.memory.memdir import MemoryStore
-            store = MemoryStore()
-            stack = MemoryStack(store=store, vector=store.vector_store)
-            wake = stack.wake_up(topic=content[:200])
-            if wake:
-                system_prompt += f"\n\n{wake}"
-        except Exception:
-            pass  # Memory not available, continue without
-
-        request_id = str(uuid.uuid4())
-        request = StreamRequest(
-            request_id=request_id,
-            model=session.model,
-            messages=session.messages,
-            system_prompt=system_prompt,
-            max_output_tokens=8192,
-            provider=session.provider,
-        )
-
-        # Stream from BackendRouter
-        accumulated_text = ""
-        content_blocks: list[dict[str, Any]] = []
+        # ── Agentic loop: up to 15 iterations ──
+        MAX_TOOL_ROUNDS = 15
+        total_usage: dict[str, int] = {}
 
         try:
-            async for event in self.backend.stream_message(request):
-                event_type = event.get("type", "")
+            for round_num in range(MAX_TOOL_ROUNDS):
+                request_id = str(uuid.uuid4())
+                request = StreamRequest(
+                    request_id=request_id,
+                    model=session.model,
+                    messages=session.messages,
+                    tools=self.TOOL_DEFINITIONS,
+                    system_prompt=system_prompt,
+                    max_output_tokens=8192,
+                    provider=session.provider,
+                )
 
-                if event_type == "text_delta":
-                    delta = event.get("delta", "")
-                    accumulated_text += delta
+                # Stream one LLM turn
+                accumulated_text = ""
+                content_blocks: list[dict[str, Any]] = []
+                pending_tool_calls: list[dict[str, Any]] = []
+                stop_reason = "end_turn"
+
+                async for event in self.backend.stream_message(request):
+                    event_type = event.get("type", "")
+
+                    if event_type == "text_delta":
+                        delta = event.get("delta", "")
+                        accumulated_text += delta
+                        await websocket.send(json.dumps({
+                            "type": "text_delta", "session_id": sid, "delta": delta,
+                        }))
+
+                    elif event_type == "tool_use":
+                        tool_call = {
+                            "id": event.get("tool_call_id", ""),
+                            "name": event.get("name", ""),
+                            "input": event.get("input", {}),
+                        }
+                        pending_tool_calls.append(tool_call)
+                        content_blocks.append({"type": "tool_use", **tool_call})
+                        await websocket.send(json.dumps({
+                            "type": "tool_use", "session_id": sid,
+                            "tool_call_id": tool_call["id"],
+                            "name": tool_call["name"],
+                            "input": tool_call["input"],
+                        }))
+
+                    elif event_type == "message_done":
+                        usage = event.get("usage", {})
+                        stop_reason = event.get("stop_reason", "end_turn")
+                        for k, v in usage.items():
+                            total_usage[k] = total_usage.get(k, 0) + (v if isinstance(v, int) else 0)
+                        break
+
+                # Build assistant message content blocks
+                if accumulated_text:
+                    content_blocks.insert(0, {"type": "text", "text": accumulated_text})
+                if content_blocks:
+                    session.add_assistant_message(content_blocks)
+
+                # If no tool calls, we're done
+                if not pending_tool_calls:
                     await websocket.send(json.dumps({
-                        "type": "text_delta",
-                        "session_id": sid,
-                        "delta": delta,
+                        "type": "message_done", "session_id": sid,
+                        "usage": total_usage, "stop_reason": stop_reason,
                     }))
-
-                elif event_type == "tool_use":
-                    tool_data = {
-                        "type": "tool_use",
-                        "session_id": sid,
-                        "tool_call_id": event.get("tool_call_id", ""),
-                        "name": event.get("name", ""),
-                        "input": event.get("input", {}),
-                    }
-                    content_blocks.append({
-                        "type": "tool_use",
-                        "id": event.get("tool_call_id", ""),
-                        "name": event.get("name", ""),
-                        "input": event.get("input", {}),
-                    })
-                    await websocket.send(json.dumps(tool_data))
-
-                elif event_type == "message_done":
-                    usage = event.get("usage", {})
-                    stop_reason = event.get("stop_reason", "end_turn")
-
-                    # Build content blocks for history
-                    if accumulated_text:
-                        content_blocks.insert(0, {"type": "text", "text": accumulated_text})
-                    if content_blocks:
-                        session.add_assistant_message(content_blocks)
-
-                    await websocket.send(json.dumps({
-                        "type": "message_done",
-                        "session_id": sid,
-                        "usage": usage,
-                        "stop_reason": stop_reason,
-                    }))
+                    # M1: Extract memories from this turn (fire-and-forget)
+                    if accumulated_text and content:
+                        asyncio.create_task(self._extract_memories_from_turn(content, accumulated_text))
+                    # SM4: Maybe trigger dream consolidation
+                    self._turn_count += 1
+                    asyncio.create_task(self._maybe_dream())
                     break
+
+                # ── Execute tools and feed results back ──
+                tool_results_content: list[dict[str, Any]] = []
+                for tc in pending_tool_calls:
+                    # Notify browser that tool is executing
+                    await websocket.send(json.dumps({
+                        "type": "tool_executing", "session_id": sid,
+                        "tool_call_id": tc["id"], "name": tc["name"],
+                    }))
+
+                    # Execute the tool
+                    result_text = await self._execute_tool(tc["name"], tc["input"])
+
+                    # Notify browser of tool result
+                    await websocket.send(json.dumps({
+                        "type": "tool_result", "session_id": sid,
+                        "tool_call_id": tc["id"], "name": tc["name"],
+                        "output": result_text[:2000],  # Truncate for display
+                    }))
+
+                    tool_results_content.append({
+                        "type": "tool_result",
+                        "tool_use_id": tc["id"],
+                        "content": result_text,
+                    })
+
+                # Add tool results as a user message (Anthropic format)
+                session.messages.append({
+                    "role": "user",
+                    "content": tool_results_content,
+                })
+
+                # Loop continues — LLM will see tool results and respond
+
+            else:
+                # Max rounds reached
+                await websocket.send(json.dumps({
+                    "type": "text_delta", "session_id": sid,
+                    "delta": "\n\n[Reached maximum tool execution rounds (15). Stopping.]",
+                }))
+                await websocket.send(json.dumps({
+                    "type": "message_done", "session_id": sid,
+                    "usage": total_usage, "stop_reason": "max_rounds",
+                }))
 
         except Exception as e:
             error_msg = str(e)
             logger.error("Chat stream error: %s", error_msg)
             await websocket.send(json.dumps({
-                "type": "error",
-                "session_id": sid,
-                "message": error_msg,
+                "type": "error", "session_id": sid, "message": error_msg,
             }))
-            # Still save partial response
-            if accumulated_text:
-                content_blocks.insert(0, {"type": "text", "text": accumulated_text})
-                session.add_assistant_message(content_blocks)
 
     # ── File System Helpers ──────────────────────────────────────────
 
@@ -721,12 +1325,17 @@ class WebServer:
         return {"roots": roots}
 
     def _read_file(self, file_path: str) -> dict[str, Any]:
-        """Read a text file, return content + language."""
+        """Read a text file or PDF, return content + language."""
         p = Path(file_path).resolve()
         if not p.is_file():
             return {"error": f"Not a file: {file_path}"}
 
         ext = p.suffix.lower()
+
+        # Handle PDF files
+        if ext == ".pdf":
+            return self._read_pdf(p)
+
         if ext not in self.TEXT_EXTS and p.name.lower() not in {"makefile", "dockerfile", "gemfile", "rakefile"}:
             return {"error": f"Binary or unsupported file type: {ext}"}
         try:
@@ -747,6 +1356,66 @@ class WebServer:
             }
         except Exception as e:
             return {"error": str(e)}
+
+    @staticmethod
+    def _read_pdf(p: Path) -> dict[str, Any]:
+        """Extract text from a PDF file. Tries multiple methods."""
+        text = ""
+
+        # Method 1: PyPDF2 / pypdf
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(str(p))
+            pages = []
+            for i, page in enumerate(reader.pages):
+                page_text = page.extract_text() or ""
+                if page_text.strip():
+                    pages.append(f"--- Page {i+1} ---\n{page_text}")
+            text = "\n\n".join(pages)
+            if text.strip():
+                return {
+                    "path": str(p),
+                    "name": p.name,
+                    "content": text,
+                    "language": "plaintext",
+                    "size": len(text),
+                    "pages": len(reader.pages),
+                    "method": "pypdf",
+                }
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # Method 2: pdfminer.six
+        try:
+            from pdfminer.high_level import extract_text as pdfminer_extract
+            text = pdfminer_extract(str(p))
+            if text.strip():
+                return {
+                    "path": str(p),
+                    "name": p.name,
+                    "content": text,
+                    "language": "plaintext",
+                    "size": len(text),
+                    "method": "pdfminer",
+                }
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # Method 3: Basic fallback — tell user to install a PDF library
+        return {
+            "error": (
+                f"Cannot read PDF: {p.name}\n"
+                "Install a PDF library:\n"
+                "  pip install pypdf\n"
+                "  OR: pip install pdfminer.six"
+            ),
+            "path": str(p),
+            "name": p.name,
+        }
 
     def _write_file(self, data: dict[str, Any]) -> dict[str, Any]:
         """Write content to a file."""
@@ -934,8 +1603,8 @@ class WebServer:
                         "size_human": self._human_size(stat.st_size),
                         "modified": int(stat.st_mtime),
                         "ext": f.suffix.lower(),
-                        "can_ingest": f.suffix.lower() in {".md", ".txt", ".html", ".json", ".yaml", ".yml"},
-                        "can_view": f.suffix.lower() in self.TEXT_EXTS,
+                        "can_ingest": f.suffix.lower() in {".md", ".txt", ".html", ".json", ".yaml", ".yml", ".pdf"},
+                        "can_view": f.suffix.lower() in self.TEXT_EXTS or f.suffix.lower() == ".pdf",
                     })
 
         return {"categories": categories, "files": files, "docs_dir": str(base)}
